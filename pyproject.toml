@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.118.2",
+    "langchain>=0.3.27",
+    "langchain-community>=0.3.31",
+    "langchain-google-genai>=2.1.12",
+    "langgraph-supervisor>=0.0.29",
     "pydantic-settings>=2.11.0",
     "uvicorn>=0.37.0",
 ]
