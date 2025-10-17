@@ -25,7 +25,7 @@ async def create_supervisor_agent(db: AsyncSession):
         Compiled supervisor graph ready to process queries
     """
 
-    logger.info("☑️ Createing Supervisor Agent...")
+    logger.info("☑️ Creating Supervisor Agent...")
 
     # Create worker agents
     product_agent = await create_product_agent(db)

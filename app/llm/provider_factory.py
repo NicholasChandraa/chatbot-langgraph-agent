@@ -12,7 +12,7 @@ from app.llm.providers import (
     GeminiProvider,
     OllamaProvider,
 )
-from app.config.settings import get_settings
+from app.config.settings.settings import get_settings
 from app.utils.logger import logger
 
 
@@ -37,9 +37,9 @@ class LLMProviderFactory:
         model_name: Optional[str] = None,
         temperature: Optional[float] = None,
         **kwargs
-    ) -> BaseLLMProvider:
+    ):
         """
-        Create LLM provider instance
+        Create LLM provider instance and return LangChain chat model
 
         Args:
             provider_name: Provider name (openai, anthropic, gemini, ollama)
@@ -51,7 +51,7 @@ class LLMProviderFactory:
             **kwargs: Additional provider-specific parameters
 
         Returns:
-            BaseLLMProvider: Configured provider instance
+            BaseChatModel: LangChain chat model instance (ready for use with agents/toolkits)
 
         Raises:
             ValueError: If provider is unknown or configuration is invalid
@@ -85,7 +85,8 @@ class LLMProviderFactory:
             f"model={provider_config.get('model_name', 'default')}"
         )
 
-        return provider
+        # Return the actual LangChain chat model client
+        return provider.get_client()
 
     @classmethod
     def _get_provider_config(

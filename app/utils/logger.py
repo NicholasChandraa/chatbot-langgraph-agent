@@ -52,7 +52,10 @@ def setup_logger():
         handler.setFormatter(JsonFormatter())
         logger.addHandler(handler)
     
-    logger.setLevel(logging.INFO)
+    # Set level based on environment
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logger.setLevel(getattr(logging, log_level, logging.INFO))
+
     return logger
 
 logger = setup_logger()

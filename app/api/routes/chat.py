@@ -57,6 +57,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         messages.append(("user", request.message))
 
         # Invoke supervisor with messages
+        logger.info("🚀 Invoking supervisor agent...")
         result = await supervisor.ainvoke({
             "messages": messages
         })
@@ -65,11 +66,22 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         # output_mode="full_history" gives us all messages
         all_messages = result.get("messages", [])
 
+        # Log all messages for debugging
+        logger.info(f"📨 Total messages in response: {len(all_messages)}")
+        for i, msg in enumerate(all_messages):
+            msg_type = getattr(msg, 'type', 'unknown')
+            msg_name = getattr(msg, 'name', 'N/A')
+            content_preview = str(msg.content)[:100] if hasattr(msg, 'content') else 'N/A'
+            logger.debug(
+                f"  [{i}] Type={msg_type} | Name={msg_name} | Content={content_preview}..."
+            )
+
         # Get last assistant message
         response_text = "Maaf, saya tidak dapat menjawab pertanyaan ini."
         for msg in reversed(all_messages):
             if hasattr(msg, 'type') and msg.type == 'ai':
                 response_text = msg.content
+                logger.info(f"✅ Final AI response extracted (length={len(response_text)} chars)")
                 break
         
         processing_time = (time.time() - start_time) * 1000
