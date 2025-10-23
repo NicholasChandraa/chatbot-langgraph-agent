@@ -33,17 +33,12 @@ async def create_supervisor_agent(db: AsyncSession, checkpointer=None):
     logger.info("☑️ Creating Supervisor Agent with DeepAgents...")
 
     # Load configs for all agents
-    config = await get_agent_config("supervisor", db)
+    llm_config = await get_agent_config("supervisor", db)
 
     # Create supervisor LLM
-    supervisor_llm = LLMProviderFactory.create(
-        provider_name=config["llm_provider"],
-        model_name=config["model_name"],
-        temperature=config["temperature"],
-        max_tokens=config["max_tokens"]
-    )
+    supervisor_llm = LLMProviderFactory.create_from_config(llm_config)
 
-    logger.info(f"✅ Supervisor LLM created: {config['model_name']}")
+    logger.info(f"✅ Supervisor LLM created: {llm_config['model_name']}")
     
     # panggil sub agent
     product_agent = await create_product_agent(db)

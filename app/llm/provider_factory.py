@@ -1,200 +1,151 @@
 """
-LLM Provider Factory
-Factory pattern untuk create LLM providers berdasarkan configuration
+LLM Provider
+Supports multiple providers: OpenAI, Anthropic, Google Gemini
 """
-from typing import Optional, Dict, Type
-from functools import lru_cache
+import os
+from typing import Optional, Dict, Any
+from langchain.chat_models import init_chat_model
+from langchain_core.language_models import BaseChatModel
 
-from app.llm.base_provider import BaseLLMProvider
-from app.llm.providers import (
-    OpenAIProvider,
-    AnthropicProvider,
-    GeminiProvider,
-    OllamaProvider,
-)
-from app.config.settings.settings import get_settings
 from app.utils.logger import logger
 
 
 class LLMProviderFactory:
     """
-    Factory untuk create LLM providers
-    Automatically selects provider berdasarkan configuration
+    Factory untuk create LLM instances dari berbagai providers
+    menggunakan LangChain's unified init_chat_model
     """
 
-    # Registry: mapping provider name ke provider class
-    _providers: Dict[str, Type[BaseLLMProvider]] = {
-        "openai": OpenAIProvider,
-        "anthropic": AnthropicProvider,
-        "gemini": GeminiProvider,
-        "ollama": OllamaProvider,
-    }
+    # Supported providers
+    SUPPORTED_PROVIDERS = ["openai", "anthropic", "ollama", "google-genai"]
 
-    @classmethod
+    @staticmethod
     def create(
-        cls,
-        provider_name: Optional[str] = None,
-        model_name: Optional[str] = None,
-        temperature: Optional[float] = None,
-        **kwargs
-    ):
+        provider_name: str,
+        model_name: str,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any
+    ) -> BaseChatModel:
         """
-        Create LLM provider instance and return LangChain chat model
+        Create LLM instance using init_chat_model.
 
         Args:
-            provider_name: Provider name (openai, anthropic, gemini, ollama)
-                          If None, uses DEFAULT_LLM_PROVIDER from settings
-            model_name: Model name to use
-                       If None, uses default model for the provider from settings
-            temperature: Sampling temperature
-                        If None, uses default from settings or provider default
+            provider_name: Provider name (openai, anthropic, ollama, google-genai)
+            model_name: Model name (gpt-4, claude-3-5-sonnet-latest, etc.)
+            temperature: Temperature for generation (0.0 - 1.0)
+            max_tokens: Maximum tokens for response
             **kwargs: Additional provider-specific parameters
 
         Returns:
-            BaseChatModel: LangChain chat model instance (ready for use with agents/toolkits)
+            BaseChatModel instance
 
         Raises:
-            ValueError: If provider is unknown or configuration is invalid
+            ValueError: If provider not supported or API key missing
+            Exception: If model initialization fails
+
+        Examples:
+            - # OpenAI
+            - llm = LLMProviderFactory.create("openai", "gpt-4", temperature=0.5)
+
+            - # Anthropic
+            - llm = LLMProviderFactory.create("anthropic", "claude-3-5-sonnet-latest")
+
+            - # Ollama (local)
+            - llm = LLMProviderFactory.create("ollama", "llama3.2", base_url="http://localhost:11434")
         """
-        settings = get_settings()
 
-        # Use default provider if not specified
-        if provider_name is None:
-            provider_name = settings.DEFAULT_LLM_PROVIDER.lower()
+        provider_name = provider_name.lower().strip()
 
-        # Validate provider exists
-        if provider_name not in cls._providers:
-            available = ", ".join(cls._providers.keys())
+        # Validate provider
+        if provider_name not in LLMProviderFactory.SUPPORTED_PROVIDERS:
             raise ValueError(
-                f"Unknown LLM provider: '{provider_name}'. "
-                f"Available providers: {available}"
+                f"Provider '{provider_name}' not supported. "
+                f"Saat ini hanya support untuk {LLMProviderFactory.SUPPORTED_PROVIDERS}"
             )
-
-        # Get provider configuration
-        provider_config = cls._get_provider_config(
-            provider_name, model_name, temperature, **kwargs
-        )
-
-        # Create provider instance
-        provider_class = cls._providers[provider_name]
-        provider = provider_class(**provider_config)
-
+        
+        # Cek API keys (Kecuali untuk ollama)
+        if provider_name != "ollama":
+            LLMProviderFactory._validate_api_key(provider_name)
+        
         logger.info(
-            f"🤖 LLM Provider created | "
-            f"provider={provider_name} | "
-            f"model={provider_config.get('model_name', 'default')}"
+            f"🤖 Membuat LLM | provider = {provider_name} | model = {model_name} | "
+            f"temperature = {temperature} | max_tokens = {max_tokens}"
         )
 
-        # Return the actual LangChain chat model client
-        return provider.get_client()
-
-    @classmethod
-    def _get_provider_config(
-        cls,
-        provider_name: str,
-        model_name: Optional[str] = None,
-        temperature: Optional[float] = None,
-        **kwargs
-    ) -> Dict:
-        """
-        Get configuration untuk specific provider dari settings
-
-        Args:
-            provider_name: Provider name
-            model_name: Optional model override
-            temperature: Optional temperature override
-            **kwargs: Additional parameters
-
-        Returns:
-            Dict: Provider configuration
-        """
-        settings = get_settings()
-
-        # Base configuration
-        config = {}
-
-        # Provider-specific configuration
-        if provider_name == "openai":
-            config = {
-                "model_name": model_name or settings.OPENAI_MODEL,
-                "api_key": settings.OPENAI_API_KEY,
-                "temperature": temperature or 0.4,
+        try:
+            # Build parameters
+            params = {
+                "model": model_name,
+                "model_provider": provider_name,
+                "temperature": temperature
             }
 
-        elif provider_name == "anthropic":
-            config = {
-                "model_name": model_name or settings.ANTHROPIC_MODEL,
-                "api_key": settings.ANTHROPIC_API_KEY,
-                "temperature": temperature or 0.4,
-            }
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+            
+            # Gabungkan kwargs tambahan kalau ada
+            params.update(kwargs)
 
-        elif provider_name == "gemini":
-            config = {
-                "model_name": model_name or settings.GEMINI_MODEL,
-                "api_key": settings.GEMINI_API_KEY,
-                "temperature": temperature or 0.4,
-            }
+            # Buat model pake unified init_chat_model
+            llm = init_chat_model(**params)
 
-        elif provider_name == "ollama":
-            config = {
-                "model_name": model_name or settings.OLLAMA_MODEL,
-                "base_url": settings.OLLAMA_BASE_URL,
-                "temperature": temperature or 0.4,
-            }
+            logger.info(f"✅ LLM created successfully: {provider_name}/{model_name}")
+            return llm
+        
+        except Exception as e:
+            logger.error(f"❌ Gagal membuat LLM: {e}")
+            raise Exception(f"Gagal untuk inisialisasi {provider_name}/{model_name}: {str(e)}")
 
-        # Merge with additional kwargs
-        config.update(kwargs)
-
-        return config
-
-    @classmethod
-    def get_available_providers(cls) -> list[str]:
+    @staticmethod
+    def _validate_api_key(provider_name: str) -> None:
         """
-        Get list of available provider names
-
-        Returns:
-            List of provider names
+        Validate API Key yang dibutuhkan ada di environment.
         """
-        return list(cls._providers.keys())
+        key_mapping = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "google-genai": "GOOGLE_API_KEY"
+        }
 
-    @classmethod
-    def register_provider(cls, name: str, provider_class: Type[BaseLLMProvider]):
-        """
-        Register custom provider (untuk extensibility)
-
-        Args:
-            name: Provider name
-            provider_class: Provider class (must inherit from BaseLLMProvider)
-        """
-        if not issubclass(provider_class, BaseLLMProvider):
+        env_var = key_mapping.get(provider_name)
+        if not env_var:
+            return # Tidak ada validasi yang diperlukan
+        
+        if not os.getenv(env_var):
             raise ValueError(
-                f"Provider class must inherit from BaseLLMProvider, "
-                f"got {provider_class.__name__}"
+                f"Ga ada API KEY untuk provider {provider_name}."
+                f"Mohon untuk set API KEY nya di environment variable: {env_var}"
             )
+    
+    @staticmethod
+    def create_from_config(config: Dict[str, Any]) -> BaseChatModel:
+        """
+        Buat LLM dari agent config dictionary
 
-        cls._providers[name.lower()] = provider_class
-        logger.info(f"✅ Custom provider registered | name={name}")
+        Args:
+            config: Config dict with keys: llm_provider, model_name, temperature, max_tokens, config_metadata
 
+        Returns:
+            BaseChatModel instance
 
-@lru_cache()
-def get_llm(
-    provider_name: Optional[str] = None,
-    model_name: Optional[str] = None,
-    **kwargs
-) -> BaseLLMProvider:
-    """
-    Get cached LLM provider instance (singleton pattern)
+        Example:
+            - config = await get_agent_config("supervisor", db)
+            - llm = LLMProviderFactory.create_from_config(config)
+        """
+        # Ekstrak base params
+        provider = config["llm_provider"]
+        model = config["model_name"]
+        temperature = config.get("temperature", 0.4)
+        max_tokens = config.get("max_tokens")
 
-    Args:
-        provider_name: Provider name
-        model_name: Model name
-        **kwargs: Additional parameters
+        # Get extra params dari metadata
+        extra_params = config.get("config_metadata", {})
 
-    Returns:
-        BaseLLMProvider: Cached provider instance
-
-    Note:
-        Uses @lru_cache untuk reuse provider instances.
-        Useful untuk avoid repeated initialization.
-    """
-    return LLMProviderFactory.create(provider_name, model_name, **kwargs)
+        return LLMProviderFactory.create(
+            provider_name=provider,
+            model_name=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **extra_params
+        )

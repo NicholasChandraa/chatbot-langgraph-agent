@@ -32,18 +32,40 @@ class JsonFormatter(Formatter):
             
         return json.dumps(json_record)
 
+class ClickablePathFormatter(Formatter):
+    """
+    Custom formatter that outputs clickable file paths for IDEs
+    Format: LEVEL - message (file:line)
+    """
+    def format(self, record):
+        # Get full file path
+        filepath = os.path.abspath(record.pathname)
+        
+        # Format: LEVEL - message (filepath:lineno)
+        log_message = f"{record.levelname:8} {record.getMessage()}"
+        location = f"{filepath}:{record.lineno}"
+        
+        # Add function name if available
+        if record.funcName and record.funcName != '<module>':
+            location = f"{filepath}:{record.funcName}:{record.lineno}"
+        
+        return f"{log_message:100} {location}"
+
+
 @lru_cache
 def setup_logger():
     logger = logging.getLogger()
     logger.handlers.clear()
     
     if not PRODUCTION:
-        # Development: gunakan Rich untuk pretty logs
+        # Development: gunakan Rich untuk pretty logs dengan clickable paths
         handler = RichHandler(
             rich_tracebacks=True,
             markup=True,
             show_time=True,
-            show_path=True
+            show_path=True,
+            enable_link_path=True,  # Enable clickable paths in Rich
+            log_time_format="[%X]"
         )
         logger.addHandler(handler)
     else:
