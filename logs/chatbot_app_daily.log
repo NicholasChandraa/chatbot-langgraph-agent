@@ -1,0 +1,15 @@
+{"timestamp": "2025-10-23T10:47:36.138344", "level": "INFO", "name": "chatbot_app", "message": "Initializing database connection pool...", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:47:36.154093", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool initialized", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:47:36.204142", "level": "ERROR", "name": "chatbot_app", "message": "Database health check failed: password authentication failed for user \"postgres\"", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:48:19.347871", "level": "INFO", "name": "chatbot_app", "message": "Initializing database connection pool...", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:48:19.361878", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool initialized", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:48:19.388471", "level": "ERROR", "name": "chatbot_app", "message": "Database health check failed: password authentication failed for user \"postgres\"", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:49:11.430428", "level": "INFO", "name": "chatbot_app", "message": "Initializing database connection pool...", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:49:11.443262", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool initialized", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:49:11.467604", "level": "ERROR", "name": "chatbot_app", "message": "Database health check failed: password authentication failed for user \"postgres\"", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:54:30.559636", "level": "INFO", "name": "chatbot_app", "message": "Initializing database connection pool...", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:54:30.572791", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool initialized", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:54:30.599524", "level": "ERROR", "name": "chatbot_app", "message": "Database health check failed: password authentication failed for user \"postgres\"", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:54:34.955889", "level": "INFO", "name": "chatbot_app", "message": "Initializing database connection pool...", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:54:34.970123", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool initialized", "app": "chatbot_app", "environment": "development"}
+{"timestamp": "2025-10-23T10:54:34.991973", "level": "ERROR", "name": "chatbot_app", "message": "Database health check failed: password authentication failed for user \"postgres\"", "app": "chatbot_app", "environment": "development"}

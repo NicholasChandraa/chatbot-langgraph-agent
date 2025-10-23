@@ -17,7 +17,7 @@ class LLMProviderFactory:
     """
 
     # Supported providers
-    SUPPORTED_PROVIDERS = ["openai", "anthropic", "ollama", "google-genai"]
+    SUPPORTED_PROVIDERS = ["openai", "anthropic", "ollama", "google_genai"]
 
     @staticmethod
     def create(
