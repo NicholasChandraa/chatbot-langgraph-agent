@@ -4,7 +4,7 @@ Health Check Endpoint
 from fastapi import APIRouter, status
 from datetime import datetime, UTC
 
-from app.schemas.health import HealthResponse
+from app.schemas.health_schema import HealthResponse
 from app.config.settings.settings import get_settings
 from app.utils.logger import logger
 from app.database.connection.connection import db_manager

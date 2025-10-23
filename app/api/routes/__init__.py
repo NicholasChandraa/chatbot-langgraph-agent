@@ -1,6 +1,6 @@
 """
 API Routes
 """
-from . import health, chat
+from . import health_routes, chat_routes, admin_routes
 
-__all__ = ["health", "chat"]
+__all__ = ["health_routes", "chat_routes", "admin_routes"]

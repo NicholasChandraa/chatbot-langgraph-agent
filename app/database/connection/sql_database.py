@@ -1,5 +1,5 @@
 from typing import Dict
-from langchain_community.utilities import SQLDatabase
+from langchain_community.utilities.sql_database import SQLDatabase
 
 from app.config.settings.settings import get_settings
 from app.utils.logger import logger

@@ -24,10 +24,6 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message")
     user_id: str = Field(..., description="User ID from upstream service")
     session_id: str = Field(..., description="Conversation session ID")
-    conversation_history: List[ConversationTurn] = Field(
-        default_factory=list,
-        description="Previous conversation history for context"
-    )
 
     class Config:
         json_schema_extra = {
@@ -35,10 +31,6 @@ class ChatRequest(BaseModel):
                 "message": "Berapa harga donut coklat?",
                 "user_id": "user_12345",
                 "session_id": "session_abc123",
-                "conversation_history": [
-                    {"role": "user", "content": "Ada donut rasa coklat?"},
-                    {"role": "assistant", "content": "Ya, kami punya donut coklat."}
-                ]
             }
         }
 

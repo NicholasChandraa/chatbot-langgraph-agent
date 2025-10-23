@@ -268,8 +268,7 @@ class AsyncSQLDatabase:
             limit = self.sample_rows_in_table_info
 
             result = await self.db.execute(
-                text(f"SELECT * FROM {table_name} LIMIT :limit"),
-                {"limit": limit}
+                text(f'SELECT * FROM "{table_name}" LIMIT {limit}'),
             )
 
             rows = result.fetchall()
@@ -312,7 +311,7 @@ class AsyncSQLDatabase:
             String representation of query results
         """
         try:
-            logger.info(f"Executing query: {query[:200]}...")
+            logger.info(f"Executing query: {query}...")
 
             result = await self.db.execute(text(query))
 

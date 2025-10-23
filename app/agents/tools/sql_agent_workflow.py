@@ -6,7 +6,7 @@ import re
 import sqlparse
 from typing import List, Optional, Dict, Any, TypedDict
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import HumanMessage
+from langchain.messages import HumanMessage
 
 from app.database.connection.async_sql_database import AsyncSQLDatabase
 from app.llm.provider_factory import LLMProviderFactory
@@ -165,12 +165,12 @@ class SQLAgentWorkflow:
         # Build workflow graph
         self.graph = self._build_graph()
 
-        logger.info(
-            f"✅ SQL Agent Workflow initialized | "
-            f"agent={agent_name} | "
-            f"tables={len(tables)} | "
-            f"llm={llm_provider}/{llm_model}"
-        )
+        # logger.info(
+        #     f"✅ SQL Agent Workflow initialized | "
+        #     f"agent={agent_name} | "
+        #     f"tables={len(tables)} | "
+        #     f"llm={llm_provider}/{llm_model}"
+        # )
 
     def _build_graph(self) -> StateGraph:
         """Build LangGraph workflow"""
@@ -208,17 +208,17 @@ class SQLAgentWorkflow:
 
     async def _list_tables_node(self, state: SQLAgentState) -> SQLAgentState:
         """Step 1: List available tables"""
-        logger.info(f"📝 Step 1: Listing tables")
+        # logger.info(f"📝 Step 1: Listing tables")
 
         state["available_tables"] = self.tables
         state["relevant_tables"] = self.tables  # Use all scoped tables
 
-        logger.info(f"Using {len(self.tables)} tables: {self.tables}")
+        # logger.info(f"Using {len(self.tables)} tables: {self.tables}")
         return state
 
     async def _get_schema_node(self, state: SQLAgentState) -> SQLAgentState:
         """Step 2: Get table schemas"""
-        logger.info(f"📖 Step 2: Getting schemas")
+        # logger.info(f"📖 Step 2: Getting schemas")
 
         try:
             table_info = await self.sql_db.get_table_info(
@@ -227,7 +227,7 @@ class SQLAgentWorkflow:
             )
             state["table_info"] = table_info
 
-            logger.info(f"Schema info retrieved: \n {table_info})")
+            # logger.info(f"Schema info retrieved: \n {table_info})")
 
         except Exception as e:
             logger.error(f"[{self.agent_name}] Failed to get schema: {e}")
@@ -239,7 +239,7 @@ class SQLAgentWorkflow:
         """Step 3: Generate SQL query"""
         state["iteration"] = state.get("iteration", 0) + 1
 
-        logger.info(f"✍️ Step 3: Generating SQL (iteration {state['iteration']})")
+        # logger.info(f"✍️ Step 3: Generating SQL (iteration {state['iteration']})")
 
         # Build feedback from previous validation
         feedback = ""
@@ -283,13 +283,13 @@ Generate ONLY the SQL query (no explanation, no markdown).
 Add -- comments in the SQL to explain each step.
 """.strip()
         
-        logger.info(f"[PROMPT] Generate Query Node: {prompt}")
+        # logger.info(f"[PROMPT] Generate Query Node: {prompt}")
 
         try:
             response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
             query = clean_llm_output(response.content.strip())
 
-            logger.info(f"[RESPONSE] Generate Query Node: {query}")
+            # logger.info(f"[RESPONSE] Generate Query Node: {query}")
 
             # Extract token usage
             token_usage = extract_token_usage(response)
@@ -299,7 +299,7 @@ Add -- comments in the SQL to explain each step.
 
             state["generated_query"] = query
 
-            logger.info(f"Token usage: {token_usage}")
+            # logger.info(f"Token usage: {token_usage}")
 
         except Exception as e:
             logger.error(f"Query generation failed: {e}")
@@ -308,8 +308,8 @@ Add -- comments in the SQL to explain each step.
         return state
 
     async def _validate_query_node(self, state: SQLAgentState) -> SQLAgentState:
-        """Step 4: Validate generated query"""
-        logger.info(f"⚠️ Step 4: Validating query")
+        """Step 4: Validate generated query (Rule-based + LLM semantic)"""
+        # logger.info(f"⚠️ Step 4: Validating query")
 
         query = state.get("generated_query")
 
@@ -362,12 +362,66 @@ Add -- comments in the SQL to explain each step.
             if 'SELECT *' in query_upper:
                 issues.append("Avoid SELECT * - specify columns")
 
+            # 5. LLM semantic validation - ONLY if rule-based passed
+            if not issues:
+                # logger.info(f"Rule-based validation passed, checking semantic issues with LLM")
+                
+                # Truncate schema context to save tokens
+                # schema_context = state.get("table_info", "")[:1000]
+                
+                validation_prompt = f"""
+Review this PostgreSQL query for CRITICAL issues only:
+
+QUERY:
+{query}
+
+CHECK FOR:
+1. Cartesian products (missing JOIN conditions between multiple tables)
+2. Invalid column references (columns not in schema)
+3. Type mismatches in comparisons
+4. Missing JOIN conditions between tables
+
+RULES:
+- If multiple tables are referenced, ensure they are properly JOINed with ON conditions
+- Verify all column names exist in the schema
+- DO NOT flag missing date filters, optional WHERE clauses, or performance issues
+- DO NOT flag queries that use only ONE table
+
+RESPOND:
+- If no critical issues, response with just "OK"
+- If critical issues found: List each issue on a new line
+""".strip()     
+                # logger.info(f"[PROMPT] Validate Query Node: {validation_prompt}")
+
+                try:
+                    response = await self.llm.ainvoke([HumanMessage(content=validation_prompt)])
+                    llm_result = clean_llm_output(response.content.strip())
+
+                    # logger.info(f"[RESPONSE] Validate Query Node: {llm_result}")
+
+                    # Extract and track token usage
+                    token_usage = extract_token_usage(response)
+                    state["total_prompt_tokens"] += token_usage["prompt_tokens"]
+                    state["total_completion_tokens"] += token_usage["completion_tokens"]
+                    state["total_tokens"] += token_usage["total_tokens"]
+
+                    # logger.info(f"[{self.agent_name}] LLM validation result: {llm_result}")
+                    # logger.info(f"[{self.agent_name}] Token usage (semantic validation): {token_usage}")
+
+                    if llm_result.upper() != "OK":
+                        issues.append(f"Semantic issue: {llm_result}")
+
+                except Exception as e:
+                    logger.warning(f"[{self.agent_name}] LLM validation failed (continuing): {e}")
+                    # Don't fail validation if LLM validation errors out
+
             # Set result
             state["query_valid"] = len(issues) == 0
             state["validation_message"] = "\n".join(issues) if issues else "Query is valid"
 
             if state["query_valid"]:
-                logger.info(f"[{self.agent_name}] ✅ Validation PASSED")
+                # logger.info(f"[{self.agent_name}] ✅ Validation PASSED")
+                pass
             else:
                 logger.warning(f"[{self.agent_name}] ❌ Validation FAILED:\n{state['validation_message']}")
 
@@ -387,40 +441,42 @@ Add -- comments in the SQL to explain each step.
         current_iter = state.get("iteration", 0)
 
         if current_iter >= max_iter:
-            logger.warning(f"[{self.agent_name}] Max iterations ({max_iter}) reached")
+            logger.warning(f"Max iterations ({max_iter}) reached")
 
             # Best effort: try to execute anyway if query exists
             if state.get("generated_query"):
-                logger.warning(f"[{self.agent_name}] Attempting best-effort execution")
+                logger.warning(f"Attempting best-effort execution")
                 return "execute"
             else:
                 return "end"
 
-        logger.info(f"[{self.agent_name}] Retrying generation ({current_iter}/{max_iter})")
+        # logger.info(f"Retrying generation ({current_iter}/{max_iter})")
         return "retry"
 
     async def _execute_query_node(self, state: SQLAgentState) -> SQLAgentState:
-        """Step 5: Execute validated query"""
-        logger.info(f"[{self.agent_name}] Step 5: Executing query")
+        """⚙️ Step 5: Execute validated query"""
+        # logger.info(f"Step 5: Executing query")
 
         query = state.get("generated_query")
         if not query:
             state["execution_error"] = "No query to execute"
-            logger.error(f"[{self.agent_name}] No query")
+            logger.error(f"No query")
             return state
 
         try:
             result = await self.sql_db.run(query)
 
+            # logger.info(f"[RESPONSE] result from db: {result}")
+
             state["query_result"] = result
             state["execution_error"] = None
 
-            logger.info(f"[{self.agent_name}] ✅ Execution successful ({len(str(result))} chars)")
+            # logger.info(f"✅ Execution successful ({len(str(result))} chars)")
             logger.debug(f"Query result preview:\n{str(result)[:500]}...")
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"[{self.agent_name}] ❌ Execution failed: {error_msg}")
+            logger.error(f"❌ Execution failed: {error_msg}")
 
             state["query_result"] = None
             state["execution_error"] = error_msg
@@ -440,7 +496,7 @@ Add -- comments in the SQL to explain each step.
             Dict with answer, query, tokens, status
         """
         try:
-            logger.info(f"[{self.agent_name}] Processing query: {question}")
+            # logger.info(f"Processing query: {question}")
 
             initial_state = {
                 "question": question,
@@ -462,7 +518,7 @@ Add -- comments in the SQL to explain each step.
             # Run workflow
             final_state = await self.graph.ainvoke(initial_state)
 
-            logger.info(f"[{self.agent_name}] ✅ Workflow completed")
+            # logger.info(f"✅ Workflow completed")
 
             # Prepare result
             query_result = final_state.get("query_result")
@@ -489,7 +545,7 @@ Add -- comments in the SQL to explain each step.
 
         except Exception as e:
             error_msg = f"Workflow failed: {str(e)}"
-            logger.error(f"[{self.agent_name}] ❌ {error_msg}", exc_info=True)
+            logger.error(f"❌ {error_msg}", exc_info=True)
             return {
                 "status": "error",
                 "answer": f"Sorry, an error occurred: {str(e)}",

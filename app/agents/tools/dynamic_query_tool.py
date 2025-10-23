@@ -3,7 +3,7 @@ Dynamic Query Tool
 LangChain tool that wraps SQL Agent workflow for ReAct agents
 """
 from typing import List
-from langchain_core.tools import tool
+from langchain.tools import tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection.async_sql_database import AsyncSQLDatabase

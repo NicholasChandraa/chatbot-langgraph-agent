@@ -1,12 +1,13 @@
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from sqlalchemy.ext.asyncio import AsyncSession
+from deepagents import CompiledSubAgent
 
 from app.agents.tools.dynamic_query_tool import create_dynamic_query_tool
 from app.config.agent_config.agent_config_manager import get_agent_config
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
 
-async def create_product_agent(db: AsyncSession):
+async def create_product_agent(db: AsyncSession) -> CompiledSubAgent:
     """
     Product Agent - Handles product-related queries.
 
@@ -16,6 +17,9 @@ async def create_product_agent(db: AsyncSession):
     - Product availability
 
     Tables: product only
+
+    Returns:
+        CompiledSubAgent ready to be used by supervisor
     """
     logger.info("🤖 Creating Product Agent...")
 
@@ -42,65 +46,68 @@ async def create_product_agent(db: AsyncSession):
     )
 
     # Create React Agent with single tool
-    agent = create_react_agent(
+    agent_graph = create_agent(
         llm,
         tools=[dynamic_query_tool],
-        prompt=(
-            "You are a Product Information Specialist for a Mister Donut Store.\n\n"
+        system_prompt=(
+            "Anda adalah spesialis data produk. Ambil informasi produk dari database dan berikan hasil yang ringkas.\n\n"
 
-            "YOUR EXPERTISE:\n"
-            "- Product names, prices, PLU codes\n"
-            "- Product categories and variants\n"
-            "- Product availability\n\n"
+            "SCOPE ANDA:\n"
+            "- Nama produk, harga, kode PLU\n"
+            "- Kategori dan varian produk\n"
+            "- Data dari tabel 'product' saja\n\n"
 
-            "HOW TO USE YOUR TOOL:\n"
-            "- Use the 'dynamic_query' tool ONCE to retrieve product data\n"
-            "- The tool accepts natural language questions\n"
-            "- It will automatically generate and execute SQL queries\n"
-            "- Available table: product\n"
-            "- Tool returns results in format: [(value1,), (value2,)] or [(col1, col2, col3), ...]\n\n"
+            "CARA MENGGUNAKAN TOOL:\n"
+            "- Gunakan tool 'dynamic_query' untuk mengambil data produk\n"
+            "- Tool menerima pertanyaan dalam bahasa natural\n"
+            "- Tool otomatis generate dan eksekusi SQL query\n"
+            "- Format hasil: [(value1,), (value2,)] atau [(col1, col2, col3), ...]\n\n"
 
-            "DATABASE CONTEXT:\n"
-            "- Product names are in UPPERCASE (e.g., 'GLAZED DONUT', 'ICED CHOCOLATE (REG)')\n"
-            "- PLU codes are strings with leading zeros (e.g., '01040109', '00000220')\n"
-            "- Prices are in Indonesian Rupiah (IDR) without decimals\n\n"
+            "KONTEKS DATABASE:\n"
+            "- Nama produk dalam HURUF BESAR (contoh: 'GLAZED DONUT', 'ICED CHOCOLATE (REG)')\n"
+            "- Kode PLU adalah string dengan leading zeros (contoh: '01040109', '00000220')\n"
+            "- Harga dalam Rupiah Indonesia (IDR) tanpa desimal\n\n"
 
-            "CRITICAL RULES:\n"
-            "1. Call the tool ONLY ONCE per question\n"
-            "2. Interpret the raw result (e.g., '[(15000,)]' means price is 15000)\n"
-            "3. Format your answer in natural, user-friendly language\n"
-            "4. DO NOT call the tool again with rephrased questions\n"
-            "5. If result is empty [] or blank, say 'Produk tidak ditemukan'\n\n"
+            "FORMAT RESPONSE:\n"
+            "- Format harga sebagai: Rp 15.000 (gunakan pemisah ribuan dengan titik)\n"
+            "- Selalu sertakan nama produk dan kode PLU\n"
+            "- Ringkas dan informatif (maksimal 500 kata)\n"
+            "- Gunakan bahasa yang sama dengan user (Indonesia/English)\n"
+            "- Jika hasil kosong [], katakan 'Produk tidak ditemukan'\n\n"
 
-            "RESPONSE FORMAT:\n"
-            "- Format prices as: Rp 15.000 (use thousand separator with dots)\n"
-            "- Always include product name and PLU code\n"
-            "- Be concise but informative\n"
-            "- Use the same language as user's question (Indonesian/English)\n"
-            "- If product not found, suggest similar products based on query results\n\n"
+            "HANDLING DATA TIDAK TERSEDIA:\n"
+            "- Jika user tanya data yang tidak ada di schema (contoh: stok, expired date):\n"
+            "  * Akui pertanyaannya\n"
+            "  * Jelaskan dengan sopan bahwa informasi spesifik tidak tersedia\n"
+            "  * Tawarkan informasi alternatif yang BISA Anda berikan (harga, kategori)\n"
+            "- Contoh: 'Maaf, informasi stok tidak tersedia. Namun saya bisa memberikan informasi harga dan kategori produk.'\n\n"
 
-            "EXAMPLE WORKFLOWS:\n\n"
-            
-            "Example 1 - Price query:\n"
-            "User: 'Berapa harga donut glazed?'\n"
-            "Thought: I need to find glazed donut price from product table\n"
-            "Action: dynamic_query\n"
-            "Action Input: What is the price of glazed donut?\n"
+            "CONTOH:\n\n"
+
+            "Contoh 1 - Query harga:\n"
+            "Pertanyaan: 'Berapa harga donut glazed?'\n"
+            "Action: dynamic_query('Berapa harga donut glazed?')\n"
             "Observation: [('GLAZED DONUT', '01040109', 15000)]\n"
-            "Thought: Found the product with price 15000. I'll format it nicely.\n"
-            "Final Answer: Harga GLAZED DONUT (PLU: 01040109) adalah Rp 15.000\n\n"
-            
-            "Example 2 - Search query:\n"
-            "User: 'What chocolate products do you have?'\n"
-            "Thought: I need to search products with 'chocolate' in the name\n"
-            "Action: dynamic_query\n"
-            "Action Input: List all products containing 'chocolate' in their name\n"
+            "Jawaban: GLAZED DONUT (PLU: 01040109) tersedia dengan harga Rp 15.000\n\n"
+
+            "Contoh 2 - Query pencarian:\n"
+            "Pertanyaan: 'Produk coklat apa saja yang ada?'\n"
+            "Action: dynamic_query('Tampilkan semua produk dengan kata chocolate')\n"
             "Observation: [('CHOCOLATE GLAZED', '01040109', 15000), ('ICED CHOCOLATE (REG)', '00000220', 25000)]\n"
-            "Thought: Found 2 chocolate products. I'll list them.\n"
-            "Final Answer: We have 2 chocolate products:\n1. CHOCOLATE GLAZED (PLU: 01040109) - Rp 15.000\n2. ICED CHOCOLATE (REG) (PLU: 00000220) - Rp 25.000"
+            "Jawaban: Produk coklat yang tersedia:\n1. CHOCOLATE GLAZED (PLU: 01040109) - Rp 15.000\n2. ICED CHOCOLATE (REG) (PLU: 00000220) - Rp 25.000"
         ),
         name="product_agent"
     )
 
-    logger.info("✅ Product Agent created with dynamic_query tool")
-    return agent
+    # Wrap in CompiledSubAgent for deepagents
+    compiled_subagent = CompiledSubAgent(
+        name="product_agent",
+        description=(
+            "Product specialist for handling product-related queries. "
+            "Use for: product information, pricing, PLU codes, product categories, availability."
+        ),
+        runnable=agent_graph
+    )
+
+    logger.info("✅ Product Agent created as CompiledSubAgent with dynamic_query tool")
+    return compiled_subagent

@@ -7,11 +7,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.api.routes import health, chat, admin
+from app.api.routes import health_routes, chat_routes, admin_routes
 from app.config.settings.settings import get_settings
 from app.utils.logger import logger
 from app.database.connection.connection import db_manager
 from app.config.agent_config.agent_config_manager import get_agent_config
+from app.database.memory.checkpointer import checkpointer_manager
 
 
 @asynccontextmanager
@@ -36,6 +37,13 @@ async def lifespan(app: FastAPI):
 
         if is_healthy:
             logger.info("✅ Database connection verified")
+
+            # Initialize checkpointer AFTER database is ready
+            try:
+                await checkpointer_manager.init()
+            except Exception as e:
+                logger.error(f"❌ Checkpointer init failed: {e}")
+                logger.warning("⚠️ Continuing without persistent memory")
 
             # Warm up cache for common agents
             async for db in db_manager.get_session():
@@ -67,6 +75,12 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("🛑 Shutting down Agent Service...")
     logger.info("=" * 60)
+
+    # Close checkpointer first
+    try:
+        await checkpointer_manager.close()
+    except Exception as e:
+        logger.error(f"Error closing checkpointer: {e}")
     
     # Close database connections
     try:
@@ -109,9 +123,9 @@ def create_app() -> FastAPI:
     )
 
     # Register routes
-    app.include_router(health.router, prefix="/api", tags=["Health"])
-    app.include_router(chat.router, prefix="/api", tags=["Chat"])
-    app.include_router(admin.router, prefix="/api", tags=["Admin"])
+    app.include_router(health_routes.router, prefix="/api", tags=["Health"])
+    app.include_router(chat_routes.router, prefix="/api", tags=["Chat"])
+    app.include_router(admin_routes.router, prefix="/api", tags=["Admin"])
     return app
 
 

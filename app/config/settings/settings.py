@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     def SQLAGENT_DATABASE_URL(self) -> str:
         """Generate SQL Agent URL from components"""
         return f"postgresql+psycopg2://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+    
+    @property
+    def POSTGRES_URL(self) -> str:
+        """Generate PURE POSTGRE SQL URL from components"""
+        return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
 
     # Connection Pool Settings
     DB_POOL_SIZE: int = Field(default=20, env="DB_POOL_SIZE")
