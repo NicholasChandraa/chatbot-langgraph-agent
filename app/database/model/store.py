@@ -6,7 +6,7 @@ from app.database.model.base_model import Base
 
 class Store(Base):
     """Master table untuk toko/outlet"""
-    __tablename__ = 'store'
+    __tablename__ = 'store_master'
     __table_args__ = (
         ForeignKeyConstraint(['branch_sid'], ['branch.branch_sid'], name='store_branch_sid_fkey'),
         PrimaryKeyConstraint('store_sid', name='store_pkey'),

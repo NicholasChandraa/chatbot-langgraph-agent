@@ -12,7 +12,9 @@ from app.config.settings.settings import get_settings
 from app.utils.logger import logger
 from app.database.connection.connection import db_manager
 from app.config.agent_config.agent_config_manager import get_agent_config
-from app.database.memory.checkpointer import checkpointer_manager
+from app.database.memory.checkpointer_manager import checkpointer_manager
+from app.database.memory.store_manager import store_manager
+
 
 
 @asynccontextmanager
@@ -44,6 +46,12 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ Checkpointer init failed: {e}")
                 logger.warning("⚠️ Continuing without persistent memory")
+            
+            try:
+                await store_manager.init()
+            except Exception as e:
+                logger.error(f"❌ Store init failed: {e}")
+                logger.warning("⚠️ Continuing without long-term memory")
 
             # Warm up cache for common agents
             async for db in db_manager.get_session():
@@ -87,6 +95,11 @@ async def lifespan(app: FastAPI):
         await db_manager.close()
     except Exception as e:
         logger.error(f"Error during database shutdown: {str(e)}", exc_info=True)
+    
+    try:
+      await store_manager.close()
+    except Exception as e:
+        logger.error(f"Error closing store: {e}")
 
     logger.info("✅ Shutdown Complete")
     logger.info("=" * 60)

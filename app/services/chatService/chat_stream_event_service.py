@@ -11,7 +11,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, System
 from app.schemas.chat_schema import ChatResponse
 from app.utils.logger import logger
 from app.agents.supervisor_agent import create_supervisor_agent
-from app.database.memory.checkpointer import checkpointer_manager
+from app.database.memory.checkpointer_manager import checkpointer_manager
 from langgraph.graph.state import CompiledStateGraph
 
 class ChatStreamEventService:

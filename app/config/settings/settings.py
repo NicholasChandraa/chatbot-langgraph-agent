@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Optional
 from functools import lru_cache
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -39,6 +40,7 @@ class Settings(BaseSettings):
 
     # Google Gemini
     GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
+    GOOGLE_API_KEY: str = Field(default="", env="GOOGLE_API_KEY")
     GEMINI_MODEL: str = Field(default="gemini-2.5-pro", env="GEMINI_MODEL")
 
     # Ollama (Local LLM)

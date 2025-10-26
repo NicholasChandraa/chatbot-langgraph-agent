@@ -10,7 +10,8 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, System
 from app.schemas.chat_schema import ChatResponse
 from app.utils.logger import logger
 from app.agents.supervisor_agent import create_supervisor_agent
-from app.database.memory.checkpointer import checkpointer_manager
+from app.database.memory.checkpointer_manager import checkpointer_manager
+from app.database.memory.store_manager import store_manager
 from langgraph.graph.state import CompiledStateGraph
 
 class ChatService:
@@ -39,12 +40,22 @@ class ChatService:
         
         logger.info(f"Chat Request | user={user_id} | session={session_id}")
         logger.info(f"Question: {message}")
-        
+
         # Get checkpointer for conversation memory
         checkpointer = ChatService._get_checkpointer(session_id)
-        
-        # Create supervisor agent with checkpointer (already compiled by DeepAgents)
-        app = await create_supervisor_agent(db, checkpointer=checkpointer)
+        store = ChatService._get_store(session_id)
+
+        # Load user context from long-term memory
+        user_context = await ChatService._load_user_context(user_id)
+        user_context_string = ChatService._format_user_context_string(user_context)
+
+        # Create supervisor agent with checkpointer, store, and user context
+        app = await create_supervisor_agent(
+            db,
+            checkpointer=checkpointer,
+            store=store,
+            user_context=user_context_string
+        )
         
         # Invoke agent with message
         result = await ChatService._invoke_agent(
@@ -106,6 +117,121 @@ class ChatService:
             logger.warning(f"⚠️ Checkpointer unavailable, using stateless mode: {e}")
             return None
     
+    @staticmethod
+    def _get_store(session_id: str):
+        """
+        Get store for long-term memory
+
+        Args:
+            session_id (str): Session identifier for logging
+
+        Returns:
+            Store instance or None if unavailable
+        """
+        try:
+            store = store_manager.get_store()
+            logger.info(f"🧠 Using long-term memory | session={session_id}")
+            return store
+        except Exception as e:
+            logger.warning(f"⚠️ Store unavailable, continuing without long-term memory: {e}")
+            return None
+
+    @staticmethod
+    async def _load_user_context(user_id: str) -> dict:
+        """
+        Load user context from long-term memory
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            Dictionary containing user context data
+        """
+        try:
+            from app.services.memory.memory_service import memory_service
+
+            # Load profile and preferences
+            profile = await memory_service.get_user_profile(user_id)
+            preferences = await memory_service.get_all_user_preferences(user_id)
+
+            context = {
+                "has_data": False,
+                "name": None,
+                "job": None,
+                "phone": None,
+                "favorite_product": None,
+                "dietary_restrictions": None,
+                "other_preferences": {}
+            }
+
+            # Extract profile data
+            if profile:
+                context["has_data"] = True
+                context["name"] = profile.get("name")
+                context["job"] = profile.get("job")
+                context["phone"] = profile.get("phone")
+
+            # Extract preferences
+            if preferences:
+                context["has_data"] = True
+                context["favorite_product"] = preferences.get("favorite_product")
+                context["dietary_restrictions"] = preferences.get("dietary_restrictions")
+
+                # Store other preferences
+                for key, value in preferences.items():
+                    if key not in ["favorite_product", "dietary_restrictions"]:
+                        context["other_preferences"][key] = value
+
+            if context["has_data"]:
+                logger.info(f"📝 Loaded user context for {user_id}")
+            else:
+                logger.debug(f"No stored context found for {user_id}")
+
+            return context
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load user context: {e}")
+            return {"has_data": False}
+
+    @staticmethod
+    def _format_user_context_string(context: dict) -> str:
+        """
+        Format user context dictionary into readable string
+
+        Args:
+            context: User context dictionary
+
+        Returns:
+            Formatted context string
+        """
+        if not context.get("has_data"):
+            return ""
+
+        lines = []
+
+        if context.get("name"):
+            lines.append(f"- Nama: {context['name']}")
+
+        if context.get("job"):
+            lines.append(f"- Pekerjaan: {context['job']}")
+
+        if context.get("phone"):
+            lines.append(f"- Telepon: {context['phone']}")
+
+        if context.get("favorite_product"):
+            lines.append(f"- Produk Favorit: {context['favorite_product']}")
+
+        if context.get("dietary_restrictions"):
+            lines.append(f"- Pantangan Makanan: {context['dietary_restrictions']}")
+
+        if context.get("other_preferences"):
+            for key, value in context["other_preferences"].items():
+                lines.append(f"- {key.replace('_', ' ').title()}: {value}")
+
+        if lines:
+            return "\n".join(lines)
+        return ""
+
     @staticmethod
     async def _invoke_agent(
         app: CompiledStateGraph,

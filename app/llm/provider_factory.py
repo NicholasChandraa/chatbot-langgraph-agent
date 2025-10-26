@@ -8,6 +8,7 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
 from app.utils.logger import logger
+from app.config.settings.settings import get_settings
 
 
 class LLMProviderFactory:
@@ -67,7 +68,9 @@ class LLMProviderFactory:
         # Cek API keys (Kecuali untuk ollama)
         if provider_name != "ollama":
             LLMProviderFactory._validate_api_key(provider_name)
-        
+            # Set API key to os.environ for LangChain to use
+            LLMProviderFactory._set_api_key_to_env(provider_name)
+
         logger.info(
             f"🤖 Membuat LLM | provider = {provider_name} | model = {model_name} | "
             f"temperature = {temperature} | max_tokens = {max_tokens}"
@@ -102,21 +105,49 @@ class LLMProviderFactory:
         """
         Validate API Key yang dibutuhkan ada di environment.
         """
+        settings = get_settings()
+
+        # Map provider to settings attribute
         key_mapping = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google-genai": "GOOGLE_API_KEY"
+            "openai": settings.OPENAI_API_KEY,
+            "anthropic": settings.ANTHROPIC_API_KEY,
+            "google_genai": settings.GOOGLE_API_KEY
         }
 
-        env_var = key_mapping.get(provider_name)
-        if not env_var:
+        api_key = key_mapping.get(provider_name)
+        if api_key is None:
             return # Tidak ada validasi yang diperlukan
-        
-        if not os.getenv(env_var):
+
+        if not api_key:
+            env_var_names = {
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "google_genai": "GOOGLE_API_KEY"
+            }
             raise ValueError(
-                f"Ga ada API KEY untuk provider {provider_name}."
-                f"Mohon untuk set API KEY nya di environment variable: {env_var}"
+                f"Ga ada API KEY untuk provider {provider_name}. "
+                f"Mohon untuk set API KEY nya di environment variable: {env_var_names.get(provider_name)}"
             )
+
+    @staticmethod
+    def _set_api_key_to_env(provider_name: str) -> None:
+        """
+        Set API key to os.environ for LangChain to use.
+        LangChain's init_chat_model reads from os.environ.
+        """
+        settings = get_settings()
+
+        # Map provider to both settings attribute and env var name
+        key_mapping = {
+            "openai": ("OPENAI_API_KEY", settings.OPENAI_API_KEY),
+            "anthropic": ("ANTHROPIC_API_KEY", settings.ANTHROPIC_API_KEY),
+            "google_genai": ("GOOGLE_API_KEY", settings.GOOGLE_API_KEY)
+        }
+
+        if provider_name in key_mapping:
+            env_var_name, api_key = key_mapping[provider_name]
+            if api_key:
+                os.environ[env_var_name] = api_key
     
     @staticmethod
     def create_from_config(config: Dict[str, Any]) -> BaseChatModel:

@@ -13,7 +13,7 @@ class StoreDailySingleItem(Base):
     __tablename__ = 'store_daily_single_item'
     __table_args__ = (
         ForeignKeyConstraint(['product_sid'], ['product.product_sid'], ondelete='RESTRICT', onupdate='CASCADE', name='fk_store_daily_single_item_product'),
-        ForeignKeyConstraint(['store_sid'], ['store.store_sid'], ondelete='RESTRICT', onupdate='CASCADE', name='fk_store_daily_single_item_store'),
+        ForeignKeyConstraint(['store_sid'], ['store_master.store_sid'], ondelete='RESTRICT', onupdate='CASCADE', name='fk_store_daily_single_item_store'),
         Index('idx_sdsi_date', 'date'),
         Index('ix_store_daily_single_item_date', 'date'),
         Index('ix_store_daily_single_item_product_sid', 'product_sid'),
