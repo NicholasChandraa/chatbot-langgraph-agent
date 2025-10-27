@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     ANTHROPIC_MODEL: str = Field(default="claude-4-5-20250929", env="ANTHROPIC_MODEL")
 
     # Google Gemini
-    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
+    # GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
     GOOGLE_API_KEY: str = Field(default="", env="GOOGLE_API_KEY")
     GEMINI_MODEL: str = Field(default="gemini-2.5-pro", env="GEMINI_MODEL")
 
