@@ -256,38 +256,3 @@
 {"timestamp": "2025-10-26T07:56:03.999609", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Long-term memory closed", "app": "chatbot_app", "environment": "development"}
 {"timestamp": "2025-10-26T07:56:04.001701", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Shutdown Complete", "app": "chatbot_app", "environment": "development"}
 {"timestamp": "2025-10-26T07:56:04.003378", "level": "INFO", "name": "chatbot_app", "message": "============================================================", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.690751", "level": "INFO", "name": "chatbot_app", "message": "\ud83d\ude80 Starting Agent Service v1.0.0", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.692496", "level": "INFO", "name": "chatbot_app", "message": "\ud83d\udccd Environment: development", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.693713", "level": "INFO", "name": "chatbot_app", "message": "\ud83e\udd16 Default LLM Provider: gemini", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.694943", "level": "INFO", "name": "chatbot_app", "message": "\ud83d\udd27 Debug Mode: True", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.696103", "level": "INFO", "name": "chatbot_app", "message": "Initializing database connection pool...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.798082", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool initialized", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.897904", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection verified", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:58.899228", "level": "INFO", "name": "chatbot_app", "message": "\ud83e\udde0 Initializing conversation memory (checkpointer)...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.092600", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Conversation memory initialized with PostgreSQL", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.094067", "level": "INFO", "name": "chatbot_app", "message": "\ud83e\udde0 Initializing long-term memory (store)...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.193212", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Long-term memory initialized with PostgreSQL", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.204183", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Config loaded for 'sql_agent': google_genai/gemini-2.5-pro (temp=0.6000000238418579)", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.207181", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Warmed cache for sql_agent", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.211980", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Config loaded for 'product_agent': google_genai/gemini-2.5-pro (temp=0.5)", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.214437", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Warmed cache for product_agent", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.217517", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Config loaded for 'sales_agent': google_genai/gemini-2.5-pro (temp=0.800000011920929)", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.218758", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Warmed cache for sales_agent", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.222031", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Config loaded for 'report_agent': google_genai/gemini-2.5-pro (temp=0.6000000238418579)", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.223447", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Warmed cache for report_agent", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.228830", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Config loaded for 'store_agent': google_genai/gemini-2.5-pro (temp=0.6000000238418579)", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.231606", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Warmed cache for store_agent", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.238164", "level": "INFO", "name": "chatbot_app", "message": "============================================================", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.240667", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Startup complete - Ready to accept requests", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:17:59.244157", "level": "INFO", "name": "chatbot_app", "message": "============================================================", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.416886", "level": "INFO", "name": "chatbot_app", "message": "============================================================", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.418566", "level": "INFO", "name": "chatbot_app", "message": "\ud83d\uded1 Shutting down Agent Service...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.420163", "level": "INFO", "name": "chatbot_app", "message": "============================================================", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.421523", "level": "INFO", "name": "chatbot_app", "message": "Closing conversation memory...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.423280", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Conversation memory closed", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.425125", "level": "INFO", "name": "chatbot_app", "message": "Closing database connection pool...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.431055", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Database connection pool closed", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.433015", "level": "INFO", "name": "chatbot_app", "message": "Closing long-term memory...", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.435238", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Long-term memory closed", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.437083", "level": "INFO", "name": "chatbot_app", "message": "\u2705 Shutdown Complete", "app": "chatbot_app", "environment": "development"}
-{"timestamp": "2025-10-26T08:18:32.438837", "level": "INFO", "name": "chatbot_app", "message": "============================================================", "app": "chatbot_app", "environment": "development"}
