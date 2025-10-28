@@ -1,28 +1,31 @@
 """
-Chat Service - Business Logic Layer
-Handles chat message processing and agent orchestration
+Chat Stream Event Service - Business Logic Layer
+Handles token-by-token streaming chat message processing
 """
 import time
 import json
-from typing import Dict, List, Any, Optional, AsyncIterator
-from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+from typing import Dict, Any, AsyncIterator
 
-from app.schemas.chat_schema import ChatResponse
 from app.utils.logger import logger
 from app.agents.supervisor_agent import create_supervisor_agent
-from app.database.memory.checkpointer_manager import checkpointer_manager
+from app.repositories.repository_container import RepositoryContainer
+from app.services.chatService.base_chat_service import BaseChatService
 from langgraph.graph.state import CompiledStateGraph
 
-class ChatStreamEventService:
-    """Service for handling chat operations"""
+class ChatStreamEventService(BaseChatService):
+    """
+    Service for handling token-by-token streaming chat operations.
+
+    Inherits shared logic from BaseChatService.
+    Only implements token streaming-specific logic.
+    """
     
     @staticmethod
     async def process_message_stream_events(
         message: str,
         user_id: str,
         session_id: str,
-        db: AsyncSession
+        repos: RepositoryContainer
     ) -> AsyncIterator[str]:
         """
         Process a chat message with token-by-token streaming (astream_events)
@@ -58,11 +61,23 @@ class ChatStreamEventService:
                 "message": message
             })
             
-            # Get checkpointer
+            # Get checkpointer for short-term memory
             checkpointer = ChatStreamEventService._get_checkpointer(session_id)
-            
-            # Create supervisor agent
-            app: CompiledStateGraph = await create_supervisor_agent(db, checkpointer=checkpointer)
+
+            # Get store for long-term memory
+            store = ChatStreamEventService._get_store(session_id)
+
+            # Load user context from long-term memory
+            user_context = await ChatStreamEventService._load_user_context(user_id)
+            user_context_string = ChatStreamEventService._format_user_context_string(user_context)
+
+            # Create supervisor agent with full context
+            app: CompiledStateGraph = await create_supervisor_agent(
+                repos,
+                checkpointer=checkpointer,
+                store=store,
+                user_context=user_context_string
+            )
             
             # Config for agent
             config = {
@@ -188,7 +203,9 @@ class ChatStreamEventService:
                 "metadata": {
                     "processing_time_ms": round(processing_time, 2),
                     "message_count": len(collected_messages),
-                    "memory_enabled": checkpointer is not None
+                    "memory_enabled": checkpointer is not None,
+                    "store_enabled": store is not None,
+                    "user_context_loaded": user_context.get("has_data", False)
                 }
             })
             
@@ -198,25 +215,10 @@ class ChatStreamEventService:
                 "error": str(e)
             })
 
-    @staticmethod
-    def _get_checkpointer(session_id: str):
-        """
-        Get checkpointer for conversation memory
-        
-        Args:
-            session_id: Session identifier for logging
-            
-        Returns:
-            Checkpointer instance or None if unavailable
-        """
-        try:
-            checkpointer = checkpointer_manager.get_checkpointer()
-            logger.info(f"🧠 Using persistent memory | session={session_id}")
-            return checkpointer
-        except Exception as e:
-            logger.warning(f"⚠️ Checkpointer unavailable, using stateless mode: {e}")
-            return None
-    
+    # ============================================================
+    # TOKEN STREAMING-SPECIFIC METHODS
+    # ============================================================
+
     @staticmethod
     def _extract_agent_from_event_name(event_name: str) -> str:
         """

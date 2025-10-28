@@ -1,13 +1,12 @@
 from langchain.agents import create_agent
-from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.tools import tool
 from deepagents import CompiledSubAgent
 
-from app.agents.tools.dynamic_query_tool import create_dynamic_query_tool
-from app.config.agent_config.agent_config_manager import get_agent_config
+from app.repositories.sales_repository import SalesRepository
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
 
-async def create_sales_agent(db: AsyncSession) -> CompiledSubAgent:
+async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
     """
     Sales Agent - Handles sales analytics queries.
 
@@ -19,12 +18,15 @@ async def create_sales_agent(db: AsyncSession) -> CompiledSubAgent:
 
     Tables: store_daily_single_item, product, store, branch
 
+    Args:
+        repo: SalesRepository instance (injected via DI)
+
     Returns:
-        CompiledSubAgent ready to be used by supervisor
+        CompiledSubAgent ready for supervisor
     """
     logger.info("🤖 Creating Sales Agent...")
 
-    config = await get_agent_config("sales_agent", db)
+    config = await repo.get_config()
 
     llm = LLMProviderFactory.create(
         provider_name=config["llm_provider"],
@@ -33,20 +35,52 @@ async def create_sales_agent(db: AsyncSession) -> CompiledSubAgent:
         max_tokens=config["max_tokens"]
     )
 
-    # Create dynamic query tool (with multiple tables for analytics)
-    dynamic_query_tool = create_dynamic_query_tool(
-        db=db,
-        tables=["store_daily_single_item", "product", "store", "branch"],
-        agent_name="sales_agent",
-        llm_provider=config["llm_provider"],
-        llm_model=config["model_name"],
-        temperature=0.0,
-        max_iterations=3
-    )
+    # Define tool with @tool decorator
+    @tool
+    async def sales_query(question: str) -> str:
+        """
+        Query sales analytics database using natural language
+
+        This tool automatically:
+        1. Converts your natural langauge question to SQL
+        2. Handles complex joins across sales, product, store, branch tables
+        3. Executes the query safely
+        4. Returns formatted results
+
+        Use this tool to get sales analytics like:
+        - Total revenue by date/period
+        - Top selling products
+        - Store performance comparison
+        - Sales trends and patterns
+
+        Args:
+            question (str): Natural language question about sales
+
+        Returns:
+            str: Query results as formatted string
+        
+        Examples:
+            "Berapa total penjualan kemarin?"
+            "Tampilkan 5 produk terlaris minggu ini"
+            "Bandingkan performa toko FS Palembang vs FS Bandung"
+        """
+        try:
+            logger.info(f"[sales_agent] Tool called: {question[:50]}...")
+
+            # Execute query via repository
+            result = await repo.execute_query(question)
+
+            logger.info(f"[sales_agent] Tool completed successfully")
+            return result
+        
+        except Exception as e:
+            error_msg = f"Error querying sales data: {str(e)}"
+            logger.error(f"[sales_agent] {error_msg}", exc_info=True)
+            return error_msg
 
     agent_graph = create_agent(
         llm,
-        tools=[dynamic_query_tool],
+        tools=[sales_query],
         system_prompt=(
             "Anda adalah spesialis analisis penjualan. Ambil data penjualan dari database dan berikan hasil analisis yang ringkas.\n\n"
 
@@ -57,7 +91,7 @@ async def create_sales_agent(db: AsyncSession) -> CompiledSubAgent:
             "- Data dari tabel: store_daily_single_item, product, store, branch\n\n"
 
             "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'dynamic_query' untuk mengambil data penjualan\n"
+            "- Gunakan tool 'sales_query' untuk mengambil data penjualan\n"
             "- Tool memiliki akses ke: store_daily_single_item, product, store, branch\n"
             "- Tool otomatis generate SQL optimal dengan JOIN\n"
             "- Tanyakan dalam bahasa natural\n"
@@ -91,13 +125,13 @@ async def create_sales_agent(db: AsyncSession) -> CompiledSubAgent:
 
             "Contoh 1 - Query revenue:\n"
             "Pertanyaan: 'Berapa total penjualan hari ini?'\n"
-            "Action: dynamic_query('Berapa total revenue untuk hari ini?')\n"
+            "Action: sales_query('Berapa total revenue untuk hari ini?')\n"
             "Observation: [(2500000,)]\n"
             "Jawaban: Total penjualan hari ini mencapai Rp 2.500.000\n\n"
 
             "Contoh 2 - Query produk terlaris:\n"
             "Pertanyaan: 'Produk apa yang paling laris minggu ini?'\n"
-            "Action: dynamic_query('Tampilkan 5 produk terlaris minggu ini berdasarkan quantity dengan nama produk')\n"
+            "Action: sales_query('Tampilkan 5 produk terlaris minggu ini berdasarkan quantity dengan nama produk')\n"
             "Observation: [('GLAZED DONUT', 250), ('CHOCOLATE GLAZED', 180), ('ICED COFFEE', 150)]\n"
             "Jawaban: Produk terlaris minggu ini:\n1. GLAZED DONUT - 250 unit\n2. CHOCOLATE GLAZED - 180 unit\n3. ICED COFFEE - 150 unit"
         ),

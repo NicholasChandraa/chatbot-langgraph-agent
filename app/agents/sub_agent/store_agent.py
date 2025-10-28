@@ -1,13 +1,12 @@
 from langchain.agents import create_agent
-from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.tools import tool
 from deepagents import CompiledSubAgent
 
-from app.agents.tools.dynamic_query_tool import create_dynamic_query_tool
-from app.config.agent_config.agent_config_manager import get_agent_config
+from app.repositories.store_repository import StoreRepository
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
 
-async def create_store_agent(db: AsyncSession) -> CompiledSubAgent:
+async def create_store_agent(repo: StoreRepository) -> CompiledSubAgent:
     """
     Store Agent - Handles store and branch queries.
 
@@ -18,12 +17,15 @@ async def create_store_agent(db: AsyncSession) -> CompiledSubAgent:
 
     Tables: store, branch
 
+    Args:
+        repo: StoreRepository instance (injected via DI)
+
     Returns:
-        CompiledSubAgent ready to be used by supervisor
+        CompiledSubAgent ready for supervisor
     """
     logger.info("🤖 Creating Store Agent...")
 
-    config = await get_agent_config("store_agent", db)
+    config = await repo.get_config()
 
     llm = LLMProviderFactory.create(
         provider_name=config["llm_provider"],
@@ -32,20 +34,50 @@ async def create_store_agent(db: AsyncSession) -> CompiledSubAgent:
         max_tokens=config["max_tokens"]
     )
 
-    # Create dynamic query tool for store data
-    dynamic_query_tool = create_dynamic_query_tool(
-        db=db,
-        tables=["store", "branch"],
-        agent_name="store_agent",
-        llm_provider=config["llm_provider"],
-        llm_model=config["model_name"],
-        temperature=0.0,
-        max_iterations=3
-    )
+    # Define tool with @tool decorator
+    @tool
+    async def store_query(question: str) -> str:
+        """
+        Query store database using natural language
+
+        This tool automatically:
+        1. Converts your natural language question to SQL
+        2. Handles joins across store and branch tables
+        3. Executes the query safely
+        4. Returns formatted results
+
+        Use this tool to get store information like:
+        - Store locations and addresses
+        - Branch information
+        - Store status and availability
+
+        Args:
+            question (str): Natural language question about stores
+
+        Returns:
+            str: Query results as formatted string
+        
+        Examples:
+            "Berapa jumlah toko yang ada"
+            "Cari toko dengan kode TPLG"
+        """
+        try:
+            logger.info(f"[store_agent] Tool called: {question[:50]}")
+
+            # Execute query via repository
+            result = await repo.execute_query(question)
+
+            logger.info(f"[store_agent] Tool completed successfully")
+            return result
+        
+        except Exception as e:
+            error_msg = f"Error querying store data: {str(e)}"
+            logger.error(f"[store_agent] {error_msg}", exc_info=True)
+            return error_msg
 
     agent_graph = create_agent(
         llm,
-        tools=[dynamic_query_tool],
+        tools=[store_query],
         system_prompt=(
             "Anda adalah spesialis informasi toko. Ambil data toko dari database dan berikan hasil yang ringkas.\n\n"
 
@@ -55,7 +87,7 @@ async def create_store_agent(db: AsyncSession) -> CompiledSubAgent:
             "- Data dari tabel: store, branch\n\n"
 
             "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'dynamic_query' untuk mengambil informasi toko\n"
+            "- Gunakan tool 'store_query' untuk mengambil informasi toko\n"
             "- Tabel yang tersedia: store, branch\n"
             "- Tool otomatis JOIN tabel jika diperlukan\n"
             "- Format hasil: [(value1,), (value2,)] atau [(col1, col2), ...]\n\n"
@@ -85,15 +117,15 @@ async def create_store_agent(db: AsyncSession) -> CompiledSubAgent:
 
             "Contoh 1 - Query jumlah:\n"
             "Pertanyaan: 'Berapa jumlah toko yang aktif?'\n"
-            "Action: dynamic_query('Berapa jumlah toko yang ada?')\n"
+            "Action: store_query('Berapa jumlah toko yang ada?')\n"
             "Observation: [(15,)]\n"
             "Jawaban: Saat ini terdapat 15 toko yang terdaftar dalam sistem.\n\n"
 
             "Contoh 2 - Query daftar:\n"
             "Pertanyaan: 'Tampilkan semua toko di Jakarta'\n"
-            "Action: dynamic_query('Tampilkan semua toko dengan kata Jakarta di lokasinya')\n"
-            "Observation: [('TJKT01', 'FLAGSHIP JAKARTA'), ('TJKT02', 'JAKARTA TIMUR')]\n"
-            "Jawaban: Toko di Jakarta:\n1. TJKT01 - FLAGSHIP JAKARTA\n2. TJKT02 - JAKARTA TIMUR"
+            "Action: store_query('Tampilkan toko dengan kode TPLG')\n"
+            "Observation: [('TPLG', 'FS PALEMBANG'),]\n"
+            "Jawaban: Toko dengan kode TPLG adalah toko FS Palembang"
         ),
         name="store_agent"
     )

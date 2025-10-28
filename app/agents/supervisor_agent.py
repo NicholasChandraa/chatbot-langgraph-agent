@@ -1,19 +1,23 @@
 import os
 
 from deepagents import create_deep_agent
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.sub_agent.product_agent import create_product_agent
 from app.agents.sub_agent.sales_agent import create_sales_agent
 from app.agents.sub_agent.store_agent import create_store_agent
 
-
+from app.repositories.repository_container import RepositoryContainer
 from app.config.agent_config.agent_config_manager import get_agent_config
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
 from app.prompt.supervisor_prompt import get_supervisor_base_prompt, inject_user_context
 
-async def create_supervisor_agent(db: AsyncSession, checkpointer=None, store=None, user_context: str = ""):
+async def create_supervisor_agent(
+    repos: RepositoryContainer, 
+    checkpointer=None, 
+    store=None, 
+    user_context: str = ""
+):
     """
     Create supervisor that manages specialized business intelligence agents using DeepAgents.
 
@@ -34,18 +38,20 @@ async def create_supervisor_agent(db: AsyncSession, checkpointer=None, store=Non
 
     logger.info("☑️ Creating Supervisor Agent with DeepAgents...")
 
-    # Load configs for all agents
-    llm_config = await get_agent_config("supervisor", db)
+    # Load supervisor config
+    # Note: We use product repo temporarily for supervisor config
+    # TODO: Consider creating dedicated SupervisorRepository if supervisor needs its own data access
+    supervisor_config = await repos.supervisor.get_config()
 
     # Create supervisor LLM
-    supervisor_llm = LLMProviderFactory.create_from_config(llm_config)
+    supervisor_llm = LLMProviderFactory.create_from_config(supervisor_config)
 
-    logger.info(f"✅ Supervisor LLM created: {llm_config['model_name']}")
+    logger.info(f"✅ Supervisor LLM created: {supervisor_config['model_name']}")
     
     # panggil sub agent
-    product_agent = await create_product_agent(db)
-    sales_agent = await create_sales_agent(db)
-    store_agent = await create_store_agent(db)
+    product_agent = await create_product_agent(repos.product)
+    sales_agent = await create_sales_agent(repos.sales)
+    store_agent = await create_store_agent(repos.store)
 
     subagents = [product_agent, sales_agent, store_agent]
 

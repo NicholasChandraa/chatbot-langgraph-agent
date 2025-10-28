@@ -1,13 +1,12 @@
 from langchain.agents import create_agent
-from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.tools import tool
 from deepagents import CompiledSubAgent
 
-from app.agents.tools.dynamic_query_tool import create_dynamic_query_tool
-from app.config.agent_config.agent_config_manager import get_agent_config
+from app.repositories.product_repository import ProductRepository
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
 
-async def create_product_agent(db: AsyncSession) -> CompiledSubAgent:
+async def create_product_agent(repo: ProductRepository) -> CompiledSubAgent:
     """
     Product Agent - Handles product-related queries.
 
@@ -18,13 +17,16 @@ async def create_product_agent(db: AsyncSession) -> CompiledSubAgent:
 
     Tables: product only
 
+    Args:
+        repo: ProductRepository instance (injected via DI)
+
     Returns:
         CompiledSubAgent ready to be used by supervisor
     """
     logger.info("🤖 Creating Product Agent...")
 
     # Load config from database
-    config = await get_agent_config("product_agent", db)
+    config = await repo.get_config()
 
     # Create LLM for ReAct agent
     llm = LLMProviderFactory.create(
@@ -34,21 +36,50 @@ async def create_product_agent(db: AsyncSession) -> CompiledSubAgent:
         max_tokens=config["max_tokens"]
     )
 
-    # Create dynamic query tool (scoped to product table only)
-    dynamic_query_tool = create_dynamic_query_tool(
-        db=db,
-        tables=["product"],
-        agent_name="product_agent",
-        llm_provider=config["llm_provider"],
-        llm_model=config["model_name"],
-        temperature=0.0,  # Deterministic for SQL generation
-        max_iterations=3
-    )
+    # Define tool using @tool decorator
+    @tool
+    async def product_query(question: str) -> str:
+        """
+        Query product database using natural language.
+
+        This tool automatically:
+        1. Converts your natural language question to SQL
+        2. Executes the query safely
+        3. Returns formatted results
+
+        Use this tool to get product information like:
+        - Product names, PLU codes
+        - Product search by keyword
+        - Product availability
+    
+        Args:
+            question (str): Natural language question about products
+
+        Returns:
+            str: Query results as formatted string
+        
+        Examples:
+            "Tampilkan semua produk coklat"
+            "Cari produk dengan PLU 000000906"
+        """
+        try:
+            logger.info(f"[product_agent] Tool called: {question[:50]}...")
+
+            # Execute query via repository (repository handles caching, metrics, etc.)
+            result = await repo.execute_query(question)
+
+            logger.info(f"[product_agent] Tool completed successfully")
+            return result
+        
+        except Exception as e:
+            error_msg = f"Error querying products: {str(e)}"
+            logger.error(f"[product_agent] {error_msg}", exc_info=True)
+            return error_msg
 
     # Create React Agent with single tool
     agent_graph = create_agent(
         llm,
-        tools=[dynamic_query_tool],
+        tools=[product_query],
         system_prompt=(
             "Anda adalah spesialis data produk. Ambil informasi produk dari database dan berikan hasil yang ringkas.\n\n"
 
@@ -58,7 +89,7 @@ async def create_product_agent(db: AsyncSession) -> CompiledSubAgent:
             "- Data dari tabel 'product' saja\n\n"
 
             "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'dynamic_query' untuk mengambil data produk\n"
+            "- Gunakan tool 'product_query' untuk mengambil data produk\n"
             "- Tool menerima pertanyaan dalam bahasa natural\n"
             "- Tool otomatis generate dan eksekusi SQL query\n"
             "- Format hasil: [(value1,), (value2,)] atau [(col1, col2, col3), ...]\n\n"
@@ -84,15 +115,9 @@ async def create_product_agent(db: AsyncSession) -> CompiledSubAgent:
 
             "CONTOH:\n\n"
 
-            "Contoh 1 - Query harga:\n"
-            "Pertanyaan: 'Berapa harga donut glazed?'\n"
-            "Action: dynamic_query('Berapa harga donut glazed?')\n"
-            "Observation: [('GLAZED DONUT', '01040109', 15000)]\n"
-            "Jawaban: GLAZED DONUT (PLU: 01040109) tersedia dengan harga Rp 15.000\n\n"
-
-            "Contoh 2 - Query pencarian:\n"
+            "Contoh 1 - Query pencarian:\n"
             "Pertanyaan: 'Produk coklat apa saja yang ada?'\n"
-            "Action: dynamic_query('Tampilkan semua produk dengan kata chocolate')\n"
+            "Action: product_query('Tampilkan semua produk dengan kata chocolate')\n"
             "Observation: [('CHOCOLATE GLAZED', '01040109', 15000), ('ICED CHOCOLATE (REG)', '00000220', 25000)]\n"
             "Jawaban: Produk coklat yang tersedia:\n1. CHOCOLATE GLAZED (PLU: 01040109) - Rp 15.000\n2. ICED CHOCOLATE (REG) (PLU: 00000220) - Rp 25.000"
         ),

@@ -9,10 +9,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.utils.logger import logger
 from app.database.connection.connection import get_db
+from app.repositories.repository_container import RepositoryContainer
 from app.services.chatService import ChatService, ChatStreamService, ChatStreamEventService
 
 router = APIRouter()
 
+# Dependency Injection for Repositories
+async def get_repositories(db: AsyncSession = Depends(get_db)) -> RepositoryContainer:
+    """
+    Dependency injection for RepositoryContainer.
+
+    This creates a repository container with all domain repositories
+    from a single database session. The container is then injected
+    into route handlers.
+
+    Benefits:
+    - Single point of dependency injection
+    - Clean separataion: HTTP layer only passes repos to service layer
+    - Easy to mock for testing
+
+    Args:
+        db (AsyncSession, optional): Database session. Defaults to Depends(get_db).
+
+    Returns:
+        RepositoryContainer with all repositories initialized
+
+    Usage:
+        @router.post("/chat")
+        async def chat(repos: RepositoryContainer = Depends(get_repositories)):
+            # Use repos.product, repos.sales, etc.
+            ...
+    """
+    return RepositoryContainer.create(db)
 
 @router.post(
     "/chat",
@@ -22,7 +50,7 @@ router = APIRouter()
     summary="Process Chat Message",
     description="Process user message through AI multi-agent system"
 )
-async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat(request: ChatRequest, repos: RepositoryContainer = Depends(get_repositories)):
     """
     Chat with AI Business Intelligence System
 
@@ -37,7 +65,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             message=request.message,
             user_id=request.user_id,
             session_id=request.session_id,
-            db=db
+            repos=repos
         )
         return response
         
@@ -53,7 +81,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     summary="Process Chat Message with Streaming",
     description="Process user message through AI multi-agent system with real-time streaming"
 )
-async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat_stream(request: ChatRequest, repos: RepositoryContainer = Depends(get_repositories)):
     """
     Chat with AI Business Intelligence System (Streaming)
 
@@ -97,7 +125,7 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)):
                     message=request.message,
                     user_id=request.user_id,
                     session_id=request.session_id,
-                    db=db
+                    repos=repos
                 ):
                     yield sse_message
             except Exception as e:
@@ -127,7 +155,7 @@ async def chat_stream(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     summary="Process Chat Message with Token-by-Token Streaming",
     description="Process user message with real-time token-by-token streaming (like ChatGPT)"
 )
-async def chat_stream_events(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat_stream_events(request: ChatRequest, repos: RepositoryContainer = Depends(get_repositories)):
     """
     Chat with AI Business Intelligence System (Token-by-Token Streaming)
 
@@ -189,7 +217,7 @@ async def chat_stream_events(request: ChatRequest, db: AsyncSession = Depends(ge
                     message=request.message,
                     user_id=request.user_id,
                     session_id=request.session_id,
-                    db=db
+                    repos=repos
                 ):
                     yield sse_message
             except Exception as e:

@@ -1,28 +1,31 @@
 """
-Chat Service - Business Logic Layer
-Handles chat message processing and agent orchestration
+Chat Stream Service - Business Logic Layer
+Handles streaming chat message processing
 """
 import time
 import json
-from typing import Dict, List, Any, Optional, AsyncIterator
-from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+from typing import Dict, Any, AsyncIterator
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
-from app.schemas.chat_schema import ChatResponse
 from app.utils.logger import logger
 from app.agents.supervisor_agent import create_supervisor_agent
-from app.database.memory.checkpointer_manager import checkpointer_manager
-from langgraph.graph.state import CompiledStateGraph
+from app.repositories.repository_container import RepositoryContainer
+from app.services.chatService.base_chat_service import BaseChatService
 
-class ChatStreamService:
-    """Service for handling chat operations"""
+class ChatStreamService(BaseChatService):
+    """
+    Service for handling streaming chat operations.
+
+    Inherits shared logic from BaseChatService.
+    Only implements streaming-specific logic.
+    """
     
     @staticmethod
     async def process_message_stream(
         message: str,
         user_id: str,
         session_id: str,
-        db: AsyncSession
+        repos: RepositoryContainer
     ) -> AsyncIterator[str]:
         """
         Process a chat message with streaming (astream)
@@ -57,11 +60,23 @@ class ChatStreamService:
                 "message": message
             })
             
-            # Get checkpointer
+            # Get checkpointer for short-term memory
             checkpointer = ChatStreamService._get_checkpointer(session_id)
-            
-            # Create supervisor agent
-            app = await create_supervisor_agent(db, checkpointer=checkpointer)
+
+            # Get store for long-term memory
+            store = ChatStreamService._get_store(session_id)
+
+            # Load user context from long-term memory
+            user_context = await ChatStreamService._load_user_context(user_id)
+            user_context_string = ChatStreamService._format_user_context_string(user_context)
+
+            # Create supervisor agent with full context
+            app = await create_supervisor_agent(
+                repos,
+                checkpointer=checkpointer,
+                store=store,
+                user_context=user_context_string
+            )
             
             # Config for agent
             config = {
@@ -133,7 +148,9 @@ class ChatStreamService:
                 "metadata": {
                     "processing_time_ms": round(processing_time, 2),
                     "message_count": len(collected_messages),
-                    "memory_enabled": checkpointer is not None
+                    "memory_enabled": checkpointer is not None,
+                    "store_enabled": store is not None,
+                    "user_context_loaded": user_context.get("has_data", False)
                 }
             })
             
@@ -143,103 +160,10 @@ class ChatStreamService:
                 "error": str(e)
             })
 
-    @staticmethod
-    def _get_checkpointer(session_id: str):
-        """
-        Get checkpointer for conversation memory
-        
-        Args:
-            session_id: Session identifier for logging
-            
-        Returns:
-            Checkpointer instance or None if unavailable
-        """
-        try:
-            checkpointer = checkpointer_manager.get_checkpointer()
-            logger.info(f"🧠 Using persistent memory | session={session_id}")
-            return checkpointer
-        except Exception as e:
-            logger.warning(f"⚠️ Checkpointer unavailable, using stateless mode: {e}")
-            return None
-    
-    @staticmethod
-    def _extract_current_turn_response(messages: List) -> str:
-        """
-        Extract AI responses from the current conversation turn only
-        
-        This avoids returning responses from conversation history
-        by finding the last HumanMessage and extracting only AI responses after it.
-        
-        Args:
-            messages: List of message objects
-            
-        Returns:
-            Combined AI response text
-        """
-        # Find the LAST HumanMessage (current user input)
-        last_human_idx = -1
-        for i, msg in enumerate(messages):
-            if isinstance(msg, HumanMessage):
-                last_human_idx = i
-        
-        # Collect AI responses ONLY after the last HumanMessage
-        ai_responses = []
-        if last_human_idx >= 0:
-            current_turn_messages = messages[last_human_idx + 1:]
-            logger.debug(
-                f"Processing {len(current_turn_messages)} messages from current turn "
-                f"(after index {last_human_idx})"
-            )
-            
-            for msg in current_turn_messages:
-                if isinstance(msg, AIMessage):
-                    # Extract text content (handle both string and list formats)
-                    text_content = ChatStreamService._extract_text_from_content(msg.content)
-                    
-                    if text_content and text_content.strip():
-                        ai_responses.append(text_content)
-                        logger.debug(
-                            f"Collected AI response from {getattr(msg, 'name', 'unknown')}: "
-                            f"{text_content[:100]}..."
-                        )
-        
-        # Combine all responses
-        if ai_responses:
-            response_text = "\n\n".join(ai_responses)
-            logger.info(f"✅ Combined {len(ai_responses)} AI responses into final answer")
-            return response_text
-        else:
-            logger.warning("⚠️ No valid AI responses found")
-            return "Maaf, saya tidak dapat menjawab pertanyaan ini."
-    
-    @staticmethod
-    def _extract_text_from_content(content) -> str:
-        """
-        Extract text from message content (handles both string and list formats)
-        
-        LangChain content can be:
-        1. String: "Some text"
-        2. List of content blocks: [{'type': 'text', 'text': 'Some text', 'extras': {...}}]
-        
-        Args:
-            content: Message content (string or list)
-            
-        Returns:
-            Extracted text string
-        """
-        if isinstance(content, str):
-            return content
-        
-        if isinstance(content, list):
-            # Extract text from content blocks
-            text_parts = []
-            for block in content:
-                if isinstance(block, dict) and block.get('type') == 'text':
-                    text_parts.append(block.get('text', ''))
-            return " ".join(text_parts)
-        
-        return ""
-    
+    # ============================================================
+    # STREAMING-SPECIFIC METHODS
+    # ============================================================
+
     @staticmethod
     def _determine_agent_name(msg: AIMessage) -> str:
         """
