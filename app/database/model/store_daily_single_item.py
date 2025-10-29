@@ -23,7 +23,7 @@ class StoreDailySingleItem(Base):
 
     # Composite Primary Key (product_sid, store_sid, date, sales_code)
     product_sid: Mapped[int] = mapped_column(Integer, primary_key=True, comment='Part of composite primary key - Foreign key ke product.product_sid. ALWAYS JOIN with product table to get product details.')
-    store_sid: Mapped[int] = mapped_column(Integer, primary_key=True, comment='Part of composite primary key - Foreign key ke store.store_sid. ALWAYS JOIN with store table to get store name/code.')
+    store_sid: Mapped[int] = mapped_column(Integer, primary_key=True, comment='Part of composite primary key - Foreign key ke store_master.store_sid. ALWAYS JOIN with store_master table to get store name/code.')
     date: Mapped[datetime.datetime] = mapped_column(DateTime, primary_key=True, comment='Part of composite primary key - Transaction/aggregation date. ALWAYS use CAST(date AS DATE) for date comparisons. Format: TIMESTAMP (e.g., 2025-01-15 00:00:00)')
     sales_code: Mapped[str] = mapped_column(String(10), primary_key=True, comment="Kode transaksi/receipt number. Can be NULL or empty string for aggregated records. Use COUNT(DISTINCT NULLIF(sales_code, '')) for counting unique transactions.")
     

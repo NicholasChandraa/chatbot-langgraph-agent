@@ -37,7 +37,7 @@ async def create_product_agent(repo: ProductRepository) -> CompiledSubAgent:
     )
 
     # Define tool using @tool decorator
-    @tool
+    @tool("product_dynamic_query")
     async def product_query(question: str) -> str:
         """
         Query product database using natural language.
@@ -89,7 +89,7 @@ async def create_product_agent(repo: ProductRepository) -> CompiledSubAgent:
             "- Data dari tabel 'product' saja\n\n"
 
             "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'product_query' untuk mengambil data produk\n"
+            "- Gunakan tool 'product_dynamic_query' untuk mengambil data produk\n"
             "- Tool menerima pertanyaan dalam bahasa natural\n"
             "- Tool otomatis generate dan eksekusi SQL query\n"
             "- Format hasil: [(value1,), (value2,)] atau [(col1, col2, col3), ...]\n\n"
@@ -117,7 +117,7 @@ async def create_product_agent(repo: ProductRepository) -> CompiledSubAgent:
 
             "Contoh 1 - Query pencarian:\n"
             "Pertanyaan: 'Produk coklat apa saja yang ada?'\n"
-            "Action: product_query('Tampilkan semua produk dengan kata chocolate')\n"
+            "Action: product_dynamic_query('Tampilkan semua produk dengan kata chocolate')\n"
             "Observation: [('CHOCOLATE GLAZED', '01040109', 15000), ('ICED CHOCOLATE (REG)', '00000220', 25000)]\n"
             "Jawaban: Produk coklat yang tersedia:\n1. CHOCOLATE GLAZED (PLU: 01040109) - Rp 15.000\n2. ICED CHOCOLATE (REG) (PLU: 00000220) - Rp 25.000"
         ),

@@ -149,7 +149,7 @@ class QueryRepository:
             question (str): The query question
             result (str): The query result to cache
         """
-        cache_key = self._get_cache_key()
+        cache_key = self._get_cache_key(question)
 
         self._cache[cache_key] = {
             "result": result,
@@ -199,9 +199,9 @@ class QueryRepository:
 
         if tokens:
             metric_data["tokens"] = tokens.get("total_tokens", 0)
-        
+
         if error:
-            metric_data["error"] - error[:200]   # Truncate long errors
+            metric_data["error"] = error[:200]   # Truncate long errors
         
         # Log metrics (can be extended to push to metrics service)
         logger.info(f"[METRICS] {metric_data}")

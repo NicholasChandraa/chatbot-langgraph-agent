@@ -369,7 +369,7 @@ async def get_async_sql_database(
     Usage:
         async for db_session in get_db():
             sql_db = await get_async_sql_database(
-                include_tables=["product", "store"]
+                include_tables=["product", "store_master"]
             )
             table_info = await sql_db.get_table_info()
             result = await sql_db.run("SELECT * FROM product LIMIT 10")

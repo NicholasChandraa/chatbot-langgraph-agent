@@ -19,7 +19,7 @@ class StoreRepository(BaseRepository):
     - Branch details
     - Store status and availability
 
-    Tables: store, branch
+    Tables: store_master, branch
     """
 
     def __init__(self, db: AsyncSession):
@@ -32,7 +32,7 @@ class StoreRepository(BaseRepository):
         self._query_repo = QueryRepository(
             db=db,
             agent_name="store_agent",
-            tables=["store", "branch"],
+            tables=["store_master", "branch"],
             cache_ttl_seconds=600  # 10 minutes (data toko jarang berubah)
         )
 

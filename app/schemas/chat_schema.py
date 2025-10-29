@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "Berapa harga donut coklat?",
+                "message": "Berapa total toko yang ada sekarang?",
                 "user_id": "user_12345",
                 "session_id": "session_abc123",
             }

@@ -62,7 +62,7 @@ async def create_supervisor_agent(
     base_prompt = get_supervisor_base_prompt()
     system_prompt = inject_user_context(base_prompt, user_context)
 
-    supervisor_graph = create_deep_agent(
+    supervisor_agent = create_deep_agent(
         model=supervisor_llm,
         subagents=subagents,
         checkpointer=checkpointer,
@@ -73,4 +73,4 @@ async def create_supervisor_agent(
     memory_status = "with checkpointer" if checkpointer else "without checkpointer"
     logger.info(f"✅ Supervisor Agent Created ({memory_status})")
 
-    return supervisor_graph
+    return supervisor_agent

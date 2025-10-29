@@ -1,6 +1,6 @@
 # coding: utf-8
 # Using sqlacodegen - Simplified for Agent Service
-# Only includes tables used by AI: branch, store, product, store_daily_single_item
+# Only includes tables used by AI: branch, store_master, product, store_daily_single_item
 # Nanti ini bisa dipecah 1 table 1 file, untuk kedepannya
 
 from sqlalchemy import Index, Integer, String, PrimaryKeyConstraint

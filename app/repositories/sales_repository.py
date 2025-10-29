@@ -18,7 +18,7 @@ class SalesRepository(BaseRepository):
     - Top selling products
     - Store performance comparison
 
-    Tables: store_daily_single_item, product, store, branch
+    Tables: store_daily_single_item, product, store_master, branch
     """
 
     def __init__(self, db: AsyncSession):
@@ -31,7 +31,7 @@ class SalesRepository(BaseRepository):
         self._query_repo = QueryRepository(
             db=db,
             agent_name="sales_agent",
-            tables=["Store_daily_single_item", "product", "store", "branch"],
+            tables=["store_daily_single_item", "product", "store_master", "branch"],
             cache_ttl_seconds=180  # 3 menit karena data sales sering berubah
         )
 

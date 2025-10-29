@@ -16,7 +16,7 @@ async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
     - Store performance
     - Sales by date/period
 
-    Tables: store_daily_single_item, product, store, branch
+    Tables: store_daily_single_item, product, store_master, branch
 
     Args:
         repo: SalesRepository instance (injected via DI)
@@ -36,7 +36,7 @@ async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
     )
 
     # Define tool with @tool decorator
-    @tool
+    @tool("sales_dynamic_query")
     async def sales_query(question: str) -> str:
         """
         Query sales analytics database using natural language
@@ -91,7 +91,7 @@ async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
             "- Data dari tabel: store_daily_single_item, product, store, branch\n\n"
 
             "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'sales_query' untuk mengambil data penjualan\n"
+            "- Gunakan tool 'sales_dynamic_query' untuk mengambil data penjualan\n"
             "- Tool memiliki akses ke: store_daily_single_item, product, store, branch\n"
             "- Tool otomatis generate SQL optimal dengan JOIN\n"
             "- Tanyakan dalam bahasa natural\n"
@@ -125,13 +125,13 @@ async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
 
             "Contoh 1 - Query revenue:\n"
             "Pertanyaan: 'Berapa total penjualan hari ini?'\n"
-            "Action: sales_query('Berapa total revenue untuk hari ini?')\n"
+            "Action: sales_dynamic_query('Berapa total revenue untuk hari ini?')\n"
             "Observation: [(2500000,)]\n"
             "Jawaban: Total penjualan hari ini mencapai Rp 2.500.000\n\n"
 
             "Contoh 2 - Query produk terlaris:\n"
             "Pertanyaan: 'Produk apa yang paling laris minggu ini?'\n"
-            "Action: sales_query('Tampilkan 5 produk terlaris minggu ini berdasarkan quantity dengan nama produk')\n"
+            "Action: sales_dynamic_query('Tampilkan 5 produk terlaris minggu ini berdasarkan quantity dengan nama produk')\n"
             "Observation: [('GLAZED DONUT', 250), ('CHOCOLATE GLAZED', 180), ('ICED COFFEE', 150)]\n"
             "Jawaban: Produk terlaris minggu ini:\n1. GLAZED DONUT - 250 unit\n2. CHOCOLATE GLAZED - 180 unit\n3. ICED COFFEE - 150 unit"
         ),

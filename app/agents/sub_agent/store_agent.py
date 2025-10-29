@@ -15,7 +15,7 @@ async def create_store_agent(repo: StoreRepository) -> CompiledSubAgent:
     - Branch management
     - Store-branch relationships
 
-    Tables: store, branch
+    Tables: store_master, branch
 
     Args:
         repo: StoreRepository instance (injected via DI)
@@ -35,7 +35,7 @@ async def create_store_agent(repo: StoreRepository) -> CompiledSubAgent:
     )
 
     # Define tool with @tool decorator
-    @tool
+    @tool("store_dynamic_query")
     async def store_query(question: str) -> str:
         """
         Query store database using natural language
@@ -84,18 +84,18 @@ async def create_store_agent(repo: StoreRepository) -> CompiledSubAgent:
             "SCOPE ANDA:\n"
             "- Detail toko (nama, kode, lokasi)\n"
             "- Manajemen dan hierarki cabang\n"
-            "- Data dari tabel: store, branch\n\n"
+            "- Data dari tabel: store_master, branch\n\n"
 
             "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'store_query' untuk mengambil informasi toko\n"
-            "- Tabel yang tersedia: store, branch\n"
+            "- Gunakan tool 'store_dynamic_query' untuk mengambil informasi toko\n"
+            "- Tabel yang tersedia: store_master, branch\n"
             "- Tool otomatis JOIN tabel jika diperlukan\n"
             "- Format hasil: [(value1,), (value2,)] atau [(col1, col2), ...]\n\n"
 
             "KONTEKS DATABASE:\n"
-            "- Tabel: store (informasi toko/outlet individual)\n"
+            "- Tabel: store_master (informasi toko/outlet individual)\n"
             "- Tabel: branch (informasi cabang/area regional)\n"
-            "- Relasi: store.branch_sid → branch.branch_sid\n"
+            "- Relasi: store_master.branch_sid → branch.branch_sid\n"
             "- Kode toko case-sensitive (contoh: 'TLPC', 'TCWS', 'TPLG')\n"
             "- Nama toko dalam HURUF BESAR\n\n"
 
@@ -117,13 +117,13 @@ async def create_store_agent(repo: StoreRepository) -> CompiledSubAgent:
 
             "Contoh 1 - Query jumlah:\n"
             "Pertanyaan: 'Berapa jumlah toko yang aktif?'\n"
-            "Action: store_query('Berapa jumlah toko yang ada?')\n"
+            "Action: store_dynamic_query('Berapa jumlah toko yang ada?')\n"
             "Observation: [(15,)]\n"
             "Jawaban: Saat ini terdapat 15 toko yang terdaftar dalam sistem.\n\n"
 
             "Contoh 2 - Query daftar:\n"
             "Pertanyaan: 'Tampilkan semua toko di Jakarta'\n"
-            "Action: store_query('Tampilkan toko dengan kode TPLG')\n"
+            "Action: store_dynamic_query('Tampilkan toko dengan kode TPLG')\n"
             "Observation: [('TPLG', 'FS PALEMBANG'),]\n"
             "Jawaban: Toko dengan kode TPLG adalah toko FS Palembang"
         ),

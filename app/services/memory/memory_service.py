@@ -206,7 +206,7 @@ class MemoryService:
             store = store_manager.get_store()
             
             results = await store.asearch(
-                namespace_prefix=("users", user_id, "memories"),
+                ("users", user_id, "memories"),
                 query=query,
                 limit=limit
             )
@@ -241,7 +241,7 @@ class MemoryService:
             store = store_manager.get_store()
             
             results = await store.asearch(
-                namespace_prefix=("users", user_id, "preferences"),
+                ("users", user_id, "preferences"),
                 limit=100
             )
             
