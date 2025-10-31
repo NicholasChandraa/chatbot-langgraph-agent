@@ -45,28 +45,48 @@ def extract_token_usage(response: Any) -> Dict[str, int]:
     Supports: Gemini, OpenAI, Anthropic, Ollama
 
     Returns:
-        Dict with prompt_tokens, completion_tokens, total_tokens
+        Dict with prompt_tokens, completion_tokens, total_tokens, cache_read, reasoning
     """
     token_usage = {
         "prompt_tokens": 0,
         "completion_tokens": 0,
-        "total_tokens": 0
+        "total_tokens": 0,
+        "cache_read_tokens": 0,
+        "reasoning_tokens": 0
     }
 
     try:
         # Priority 1: Check for usage_metadata as direct attribute (Gemini 2.5+)
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             usage = response.usage_metadata
+            logger.warning(f"[USAGE METADATA]: {usage}")
             # Handle both dict and object formats
             if isinstance(usage, dict):
                 token_usage["prompt_tokens"] = usage.get('input_tokens', 0) or usage.get('prompt_token_count', 0)
                 token_usage["completion_tokens"] = usage.get('output_tokens', 0) or usage.get('candidates_token_count', 0)
                 token_usage["total_tokens"] = usage.get('total_tokens', 0) or usage.get('total_token_count', 0)
+
+                # Extract cache_read from input_token_details
+                input_details = usage.get('input_token_details', {})
+                token_usage["cache_read_tokens"] = input_details.get('cache_read', 0) if input_details else 0
+
+                # Extract reasoning from output_token_details
+                output_details = usage.get('output_token_details', {})
+                token_usage["reasoning_tokens"] = output_details.get('reasoning', 0) if output_details else 0
             else:
-                # Object format
+                # Object format (Pydantic model)
                 token_usage["prompt_tokens"] = getattr(usage, 'input_tokens', 0) or getattr(usage, 'prompt_token_count', 0)
                 token_usage["completion_tokens"] = getattr(usage, 'output_tokens', 0) or getattr(usage, 'candidates_token_count', 0)
                 token_usage["total_tokens"] = getattr(usage, 'total_tokens', 0) or getattr(usage, 'total_token_count', 0)
+
+                # Extract from nested objects
+                input_details = getattr(usage, 'input_token_details', None)
+                if input_details:
+                    token_usage["cache_read_tokens"] = getattr(input_details, 'cache_read', 0)
+
+                output_details = getattr(usage, 'output_token_details', None)
+                if output_details:
+                    token_usage["reasoning_tokens"] = getattr(output_details, 'reasoning', 0)
 
             return token_usage
 
@@ -123,6 +143,8 @@ class SQLAgentState(TypedDict):
     total_prompt_tokens: int
     total_completion_tokens: int
     total_tokens: int
+    total_cache_read_tokens: int
+    total_reasoning_tokens: int
 
     # Control flow
     iteration: int
@@ -165,12 +187,12 @@ class SQLAgentWorkflow:
         # Build workflow graph
         self.graph = self._build_graph()
 
-        # logger.info(
-        #     f"✅ SQL Agent Workflow initialized | "
-        #     f"agent={agent_name} | "
-        #     f"tables={len(tables)} | "
-        #     f"llm={llm_provider}/{llm_model}"
-        # )
+        logger.info(
+            f"✅ SQL Agent Workflow initialized | "
+            f"agent={agent_name} | "
+            f"tables={len(tables)} | "
+            f"llm={llm_provider}/{llm_model}"
+        )
 
     def _build_graph(self) -> StateGraph:
         """Build LangGraph workflow"""
@@ -208,17 +230,17 @@ class SQLAgentWorkflow:
 
     async def _list_tables_node(self, state: SQLAgentState) -> SQLAgentState:
         """Step 1: List available tables"""
-        # logger.info(f"📝 Step 1: Listing tables")
+        logger.info(f"📝 Step 1: Listing tables")
 
         state["available_tables"] = self.tables
         state["relevant_tables"] = self.tables  # Use all scoped tables
 
-        # logger.info(f"Using {len(self.tables)} tables: {self.tables}")
+        logger.info(f"   Using {len(self.tables)} tables: {self.tables}")
         return state
 
     async def _get_schema_node(self, state: SQLAgentState) -> SQLAgentState:
         """Step 2: Get table schemas"""
-        # logger.info(f"📖 Step 2: Getting schemas")
+        logger.info(f"📖 Step 2: Getting schemas")
 
         try:
             table_info = await self.sql_db.get_table_info(
@@ -227,7 +249,7 @@ class SQLAgentWorkflow:
             )
             state["table_info"] = table_info
 
-            # logger.info(f"Schema info retrieved: \n {table_info})")
+            # logger.info(f"   Schema info retrieved: \n {table_info})")
 
         except Exception as e:
             logger.error(f"[{self.agent_name}] Failed to get schema: {e}")
@@ -239,7 +261,7 @@ class SQLAgentWorkflow:
         """Step 3: Generate SQL query"""
         state["iteration"] = state.get("iteration", 0) + 1
 
-        # logger.info(f"✍️ Step 3: Generating SQL (iteration {state['iteration']})")
+        logger.info(f"✍️ Step 3: Generating SQL (iteration {state['iteration']})")
 
         # Build feedback from previous validation
         feedback = ""
@@ -296,10 +318,26 @@ Add -- comments in the SQL to explain each step.
             state["total_prompt_tokens"] += token_usage["prompt_tokens"]
             state["total_completion_tokens"] += token_usage["completion_tokens"]
             state["total_tokens"] += token_usage["total_tokens"]
+            state["total_cache_read_tokens"] += token_usage["cache_read_tokens"]
+            state["total_reasoning_tokens"] += token_usage["reasoning_tokens"]
 
             state["generated_query"] = query
 
-            # logger.info(f"Token usage: {token_usage}")
+            # Detailed token logging for GENERATE QUERY
+            logger.info(
+                f"📊 [GENERATE QUERY - Iteration {state['iteration']}] Token Breakdown:\n"
+                f"   • Input Tokens:      {token_usage['prompt_tokens']}\n"
+                f"   • Output Tokens:     {token_usage['completion_tokens']}\n"
+                f"   • Cache Read:        {token_usage['cache_read_tokens']}\n"
+                f"   • Reasoning Tokens:  {token_usage['reasoning_tokens']}\n"
+                f"   • TOTAL:             {token_usage['total_tokens']}"
+            )
+            logger.info(
+                f"📊 [CUMULATIVE] Running Total:\n"
+                f"   • Total Input:       {state['total_prompt_tokens']}\n"
+                f"   • Total Output:      {state['total_completion_tokens']}\n"
+                f"   • GRAND TOTAL:       {state['total_tokens']}"
+            )
 
         except Exception as e:
             logger.error(f"Query generation failed: {e}")
@@ -309,7 +347,7 @@ Add -- comments in the SQL to explain each step.
 
     async def _validate_query_node(self, state: SQLAgentState) -> SQLAgentState:
         """Step 4: Validate generated query (Rule-based + LLM semantic)"""
-        # logger.info(f"⚠️ Step 4: Validating query")
+        logger.info(f"⚠️ Step 4: Validating query")
 
         query = state.get("generated_query")
 
@@ -362,14 +400,18 @@ Add -- comments in the SQL to explain each step.
             if 'SELECT *' in query_upper:
                 issues.append("Avoid SELECT * - specify columns")
 
-            # 5. LLM semantic validation - ONLY if rule-based passed
+            # 5. LLM semantic validation - CONDITIONAL (only for complex queries)
             if not issues:
-                # logger.info(f"Rule-based validation passed, checking semantic issues with LLM")
-                
-                # Truncate schema context to save tokens
-                # schema_context = state.get("table_info", "")[:1000]
-                
-                validation_prompt = f"""
+                # Check query complexity to decide if semantic validation is needed
+                join_count = query_upper.count('JOIN')
+                has_subquery = 'SELECT' in query_upper.split('FROM', 1)[1] if 'FROM' in query_upper and len(query_upper.split('FROM', 1)) > 1 else False
+                is_complex = join_count >= 2 or has_subquery
+
+                # Only run semantic validation for complex queries (save tokens)
+                if is_complex:
+                    logger.info(f"[{self.agent_name}] Running semantic validation (joins={join_count}, subquery={has_subquery})")
+
+                    validation_prompt = f"""
 Review this PostgreSQL query for CRITICAL issues only:
 
 QUERY:
@@ -390,37 +432,56 @@ RULES:
 RESPOND:
 - If no critical issues, response with just "OK"
 - If critical issues found: List each issue on a new line
-""".strip()     
-                # logger.info(f"[PROMPT] Validate Query Node: {validation_prompt}")
+""".strip()
+                    # logger.info(f"[PROMPT] Validate Query Node: {validation_prompt}")
 
-                try:
-                    response = await self.llm.ainvoke([HumanMessage(content=validation_prompt)])
-                    llm_result = clean_llm_output(response.content.strip())
+                    try:
+                        response = await self.llm.ainvoke([HumanMessage(content=validation_prompt)])
+                        llm_result = clean_llm_output(response.content.strip())
 
-                    # logger.info(f"[RESPONSE] Validate Query Node: {llm_result}")
+                        # logger.info(f"[RESPONSE] Validate Query Node: {llm_result}")
 
-                    # Extract and track token usage
-                    token_usage = extract_token_usage(response)
-                    state["total_prompt_tokens"] += token_usage["prompt_tokens"]
-                    state["total_completion_tokens"] += token_usage["completion_tokens"]
-                    state["total_tokens"] += token_usage["total_tokens"]
+                        # Extract and track token usage
+                        token_usage = extract_token_usage(response)
+                        state["total_prompt_tokens"] += token_usage["prompt_tokens"]
+                        state["total_completion_tokens"] += token_usage["completion_tokens"]
+                        state["total_tokens"] += token_usage["total_tokens"]
+                        state["total_cache_read_tokens"] += token_usage["cache_read_tokens"]
+                        state["total_reasoning_tokens"] += token_usage["reasoning_tokens"]
 
-                    # logger.info(f"[{self.agent_name}] LLM validation result: {llm_result}")
-                    # logger.info(f"[{self.agent_name}] Token usage (semantic validation): {token_usage}")
+                        # Detailed token logging for SEMANTIC VALIDATION
+                        logger.info(
+                            f"📊 [SEMANTIC VALIDATION] Token Breakdown:\n"
+                            f"   • Input Tokens:      {token_usage['prompt_tokens']}\n"
+                            f"   • Output Tokens:     {token_usage['completion_tokens']}\n"
+                            f"   • Cache Read:        {token_usage['cache_read_tokens']}\n"
+                            f"   • Reasoning Tokens:  {token_usage['reasoning_tokens']}\n"
+                            f"   • TOTAL:             {token_usage['total_tokens']}"
+                        )
+                        logger.info(
+                            f"📊 [CUMULATIVE] Running Total After Validation:\n"
+                            f"   • Total Input:       {state['total_prompt_tokens']}\n"
+                            f"   • Total Output:      {state['total_completion_tokens']}\n"
+                            f"   • GRAND TOTAL:       {state['total_tokens']}"
+                        )
 
-                    if llm_result.upper() != "OK":
-                        issues.append(f"Semantic issue: {llm_result}")
+                        if llm_result.upper() != "OK":
+                            issues.append(f"Semantic issue: {llm_result}")
 
-                except Exception as e:
-                    logger.warning(f"[{self.agent_name}] LLM validation failed (continuing): {e}")
-                    # Don't fail validation if LLM validation errors out
+                    except Exception as e:
+                        logger.warning(f"[{self.agent_name}] LLM validation failed (continuing): {e}")
+                        # Don't fail validation if LLM validation errors out
+
+                else:
+                    # Simple query - skip semantic validation to save tokens
+                    logger.info(f"[{self.agent_name}] Semantic validation skipped (simple query, joins={join_count}) - saved ~500-1000 tokens")
 
             # Set result
             state["query_valid"] = len(issues) == 0
             state["validation_message"] = "\n".join(issues) if issues else "Query is valid"
 
             if state["query_valid"]:
-                # logger.info(f"[{self.agent_name}] ✅ Validation PASSED")
+                logger.info(f"[{self.agent_name}] ✅ Validation PASSED")
                 pass
             else:
                 logger.warning(f"[{self.agent_name}] ❌ Validation FAILED:\n{state['validation_message']}")
@@ -441,7 +502,7 @@ RESPOND:
         current_iter = state.get("iteration", 0)
 
         if current_iter >= max_iter:
-            logger.warning(f"Max iterations ({max_iter}) reached")
+            # logger.warning(f"Max iterations ({max_iter}) reached")
 
             # Best effort: try to execute anyway if query exists
             if state.get("generated_query"):
@@ -450,12 +511,12 @@ RESPOND:
             else:
                 return "end"
 
-        # logger.info(f"Retrying generation ({current_iter}/{max_iter})")
+        logger.info(f"Retrying generation ({current_iter}/{max_iter})")
         return "retry"
 
     async def _execute_query_node(self, state: SQLAgentState) -> SQLAgentState:
         """⚙️ Step 5: Execute validated query"""
-        # logger.info(f"Step 5: Executing query")
+        logger.info(f"Step 5: Executing query")
 
         query = state.get("generated_query")
         if not query:
@@ -471,8 +532,8 @@ RESPOND:
             state["query_result"] = result
             state["execution_error"] = None
 
-            # logger.info(f"✅ Execution successful ({len(str(result))} chars)")
-            logger.debug(f"Query result preview:\n{str(result)[:500]}...")
+            logger.info(f"✅ Execution successful ({len(str(result))} chars)")
+            # logger.debug(f"Query result preview:\n{str(result)[:500]}...")
 
         except Exception as e:
             error_msg = str(e)
@@ -511,6 +572,8 @@ RESPOND:
                 "total_prompt_tokens": 0,
                 "total_completion_tokens": 0,
                 "total_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_reasoning_tokens": 0,
                 "iteration": 0,
                 "max_iterations": self.max_iterations
             }
@@ -518,7 +581,18 @@ RESPOND:
             # Run workflow
             final_state = await self.graph.ainvoke(initial_state)
 
-            # logger.info(f"✅ Workflow completed")
+            logger.info(f"✅ Workflow completed")
+
+            # Final token summary
+            logger.info(
+                f"📊 [FINAL SUMMARY] SQL Workflow Token Usage:\n"
+                f"   • Iterations:        {final_state.get('iteration', 0)}\n"
+                f"   • Total Input:       {final_state.get('total_prompt_tokens', 0)}\n"
+                f"   • Total Output:      {final_state.get('total_completion_tokens', 0)}\n"
+                f"   • Cache Read:        {final_state.get('total_cache_read_tokens', 0)}\n"
+                f"   • Reasoning:         {final_state.get('total_reasoning_tokens', 0)}\n"
+                f"   • GRAND TOTAL:       {final_state.get('total_tokens', 0)}"
+            )
 
             # Prepare result
             query_result = final_state.get("query_result")
@@ -539,7 +613,9 @@ RESPOND:
                 "tokens": {
                     "prompt_tokens": final_state.get("total_prompt_tokens", 0),
                     "completion_tokens": final_state.get("total_completion_tokens", 0),
-                    "total_tokens": final_state.get("total_tokens", 0)
+                    "total_tokens": final_state.get("total_tokens", 0),
+                    "cache_read_tokens": final_state.get("total_cache_read_tokens", 0),
+                    "reasoning_tokens": final_state.get("total_reasoning_tokens", 0)
                 }
             }
 

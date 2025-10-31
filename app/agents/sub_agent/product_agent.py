@@ -1,10 +1,13 @@
 from langchain.agents import create_agent
+from langchain.agents.middleware import after_model
 from langchain_core.tools import tool
 from deepagents import CompiledSubAgent
 
 from app.repositories.product_repository import ProductRepository
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
+from app.prompt.product_agent_prompt import get_product_agent_prompt
+from app.services.token_tracking_service import track_subagent_direct_tokens
 
 async def create_product_agent(repo: ProductRepository) -> CompiledSubAgent:
     """
@@ -76,52 +79,42 @@ async def create_product_agent(repo: ProductRepository) -> CompiledSubAgent:
             logger.error(f"[product_agent] {error_msg}", exc_info=True)
             return error_msg
 
+    # Middleware to track token usage
+    @after_model
+    async def track_tokens(request, response):
+        """Track LLM token usage from product_agent"""
+        try:
+            usage_metadata = getattr(response, 'usage_metadata', None)
+            if usage_metadata:
+                input_tokens = usage_metadata.get('input_tokens', 0)
+                output_tokens = usage_metadata.get('output_tokens', 0)
+                total_tokens = usage_metadata.get('total_tokens', input_tokens + output_tokens)
+
+                cache_read = usage_metadata.get('input_token_details', {}).get('cache_read', 0)
+                reasoning = usage_metadata.get('output_token_details', {}).get('reasoning', 0)
+
+                logger.info(f"📊 [product_agent] LLM tokens: {total_tokens}")
+
+                track_subagent_direct_tokens(
+                    agent_name="product_agent",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cache_read_tokens=cache_read,
+                    reasoning_tokens=reasoning
+                )
+        except Exception as e:
+            logger.error(f"[product_agent] Token tracking error: {e}")
+
+        return response
+
     # Create React Agent with single tool
     agent_graph = create_agent(
         llm,
         tools=[product_query],
-        system_prompt=(
-            "Anda adalah spesialis data produk. Ambil informasi produk dari database dan berikan hasil yang ringkas.\n\n"
-
-            "SCOPE ANDA:\n"
-            "- Nama produk, harga, kode PLU\n"
-            "- Kategori dan varian produk\n"
-            "- Data dari tabel 'product' saja\n\n"
-
-            "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'product_dynamic_query' untuk mengambil data produk\n"
-            "- Tool menerima pertanyaan dalam bahasa natural\n"
-            "- Tool otomatis generate dan eksekusi SQL query\n"
-            "- Format hasil: [(value1,), (value2,)] atau [(col1, col2, col3), ...]\n\n"
-
-            "KONTEKS DATABASE:\n"
-            "- Nama produk dalam HURUF BESAR (contoh: 'GLAZED DONUT', 'ICED CHOCOLATE (REG)')\n"
-            "- Kode PLU adalah string dengan leading zeros (contoh: '01040109', '00000220')\n"
-            "- Harga dalam Rupiah Indonesia (IDR) tanpa desimal\n\n"
-
-            "FORMAT RESPONSE:\n"
-            "- Format harga sebagai: Rp 15.000 (gunakan pemisah ribuan dengan titik)\n"
-            "- Selalu sertakan nama produk dan kode PLU\n"
-            "- Ringkas dan informatif (maksimal 500 kata)\n"
-            "- Gunakan bahasa yang sama dengan user (Indonesia/English)\n"
-            "- Jika hasil kosong [], katakan 'Produk tidak ditemukan'\n\n"
-
-            "HANDLING DATA TIDAK TERSEDIA:\n"
-            "- Jika user tanya data yang tidak ada di schema (contoh: stok, expired date):\n"
-            "  * Akui pertanyaannya\n"
-            "  * Jelaskan dengan sopan bahwa informasi spesifik tidak tersedia\n"
-            "  * Tawarkan informasi alternatif yang BISA Anda berikan (harga, kategori)\n"
-            "- Contoh: 'Maaf, informasi stok tidak tersedia. Namun saya bisa memberikan informasi harga dan kategori produk.'\n\n"
-
-            "CONTOH:\n\n"
-
-            "Contoh 1 - Query pencarian:\n"
-            "Pertanyaan: 'Produk coklat apa saja yang ada?'\n"
-            "Action: product_dynamic_query('Tampilkan semua produk dengan kata chocolate')\n"
-            "Observation: [('CHOCOLATE GLAZED', '01040109', 15000), ('ICED CHOCOLATE (REG)', '00000220', 25000)]\n"
-            "Jawaban: Produk coklat yang tersedia:\n1. CHOCOLATE GLAZED (PLU: 01040109) - Rp 15.000\n2. ICED CHOCOLATE (REG) (PLU: 00000220) - Rp 25.000"
-        ),
-        name="product_agent"
+        system_prompt=get_product_agent_prompt(),
+        name="product_agent",
+        middleware=[track_tokens]
     )
 
     # Wrap in CompiledSubAgent for deepagents

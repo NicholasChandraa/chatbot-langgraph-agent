@@ -1,10 +1,13 @@
 from langchain.agents import create_agent
+from langchain.agents.middleware import after_model
 from langchain_core.tools import tool
 from deepagents import CompiledSubAgent
 
 from app.repositories.sales_repository import SalesRepository
 from app.llm.provider_factory import LLMProviderFactory
 from app.utils.logger import logger
+from app.prompt.sales_agent_prompt import get_sales_agent_prompt
+from app.services.token_tracking_service import track_subagent_direct_tokens
 
 async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
     """
@@ -78,64 +81,41 @@ async def create_sales_agent(repo: SalesRepository) -> CompiledSubAgent:
             logger.error(f"[sales_agent] {error_msg}", exc_info=True)
             return error_msg
 
+    # Middleware to track token usage
+    @after_model
+    async def track_tokens(request, response):
+        """Track LLM token usage from sales_agent"""
+        try:
+            usage_metadata = getattr(response, 'usage_metadata', None)
+            if usage_metadata:
+                input_tokens = usage_metadata.get('input_tokens', 0)
+                output_tokens = usage_metadata.get('output_tokens', 0)
+                total_tokens = usage_metadata.get('total_tokens', input_tokens + output_tokens)
+
+                cache_read = usage_metadata.get('input_token_details', {}).get('cache_read', 0)
+                reasoning = usage_metadata.get('output_token_details', {}).get('reasoning', 0)
+
+                logger.info(f"📊 [sales_agent] LLM tokens: {total_tokens}")
+
+                track_subagent_direct_tokens(
+                    agent_name="sales_agent",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cache_read_tokens=cache_read,
+                    reasoning_tokens=reasoning
+                )
+        except Exception as e:
+            logger.error(f"[sales_agent] Token tracking error: {e}")
+
+        return response
+
     agent_graph = create_agent(
         llm,
         tools=[sales_query],
-        system_prompt=(
-            "Anda adalah spesialis analisis penjualan. Ambil data penjualan dari database dan berikan hasil analisis yang ringkas.\n\n"
-
-            "SCOPE ANDA:\n"
-            "- Analisis revenue dan trend penjualan\n"
-            "- Identifikasi produk terlaris\n"
-            "- Perbandingan performa toko\n"
-            "- Data dari tabel: store_daily_single_item, product, store, branch\n\n"
-
-            "CARA MENGGUNAKAN TOOL:\n"
-            "- Gunakan tool 'sales_dynamic_query' untuk mengambil data penjualan\n"
-            "- Tool memiliki akses ke: store_daily_single_item, product, store, branch\n"
-            "- Tool otomatis generate SQL optimal dengan JOIN\n"
-            "- Tanyakan dalam bahasa natural\n"
-            "- Format hasil: [(value1,), (value2,)] atau [(col1, col2, col3), ...]\n\n"
-
-            "KONTEKS DATABASE:\n"
-            "- Tabel utama: store_daily_single_item (transaksi penjualan)\n"
-            "- Kolom penting:\n"
-            "  * qty_sales: Quantity terjual (unit)\n"
-            "  * rp_sales: Revenue dalam Rupiah Indonesia\n"
-            "  * date: Tanggal transaksi\n"
-            "- Tool otomatis JOIN tabel jika diperlukan\n\n"
-
-            "FORMAT RESPONSE:\n"
-            "- Format mata uang sebagai: Rp 1.500.000 (dengan pemisah ribuan titik)\n"
-            "- Sertakan nama produk/toko, bukan hanya ID\n"
-            "- Berikan konteks dan insight, bukan hanya angka mentah\n"
-            "- Untuk trend, sebutkan periode waktu dengan jelas\n"
-            "- Ringkas dan informatif (maksimal 500 kata)\n"
-            "- Gunakan bahasa yang sama dengan user (Indonesia/English)\n"
-            "- Jika hasil kosong [], katakan 'Tidak ada data penjualan ditemukan'\n\n"
-
-            "HANDLING DATA TIDAK TERSEDIA:\n"
-            "- Jika user tanya metrik yang tidak ada di schema (contoh: profit margin, demografi):\n"
-            "  * Akui pertanyaannya\n"
-            "  * Jelaskan dengan sopan bahwa metrik spesifik tidak tersedia\n"
-            "  * Sarankan metrik alternatif yang BISA Anda berikan (revenue, quantity, trend)\n"
-            "- Contoh: 'Maaf, data margin keuntungan tidak tersedia. Namun saya bisa menampilkan total revenue dan quantity penjualan.'\n\n"
-
-            "CONTOH:\n\n"
-
-            "Contoh 1 - Query revenue:\n"
-            "Pertanyaan: 'Berapa total penjualan hari ini?'\n"
-            "Action: sales_dynamic_query('Berapa total revenue untuk hari ini?')\n"
-            "Observation: [(2500000,)]\n"
-            "Jawaban: Total penjualan hari ini mencapai Rp 2.500.000\n\n"
-
-            "Contoh 2 - Query produk terlaris:\n"
-            "Pertanyaan: 'Produk apa yang paling laris minggu ini?'\n"
-            "Action: sales_dynamic_query('Tampilkan 5 produk terlaris minggu ini berdasarkan quantity dengan nama produk')\n"
-            "Observation: [('GLAZED DONUT', 250), ('CHOCOLATE GLAZED', 180), ('ICED COFFEE', 150)]\n"
-            "Jawaban: Produk terlaris minggu ini:\n1. GLAZED DONUT - 250 unit\n2. CHOCOLATE GLAZED - 180 unit\n3. ICED COFFEE - 150 unit"
-        ),
-        name="sales_agent"
+        system_prompt=get_sales_agent_prompt(),
+        name="sales_agent",
+        middleware=[track_tokens]
     )
 
     # Wrap in CompiledSubAgent for deepagents

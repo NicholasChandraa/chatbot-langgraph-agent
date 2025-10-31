@@ -1,13 +1,13 @@
 """
-Dynamic Query Tool
-LangChain tool that wraps SQL Agent workflow for ReAct agents
+Query Tool Factory
+Factory for creating LangChain tools that wrap SQL Agent workflow
 """
 from typing import List
 from langchain.tools import tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection.async_sql_database import AsyncSQLDatabase
-from app.agents.tools.sql_agent_workflow import SQLAgentWorkflow
+from app.agents.workflows.sql_agent_workflow import SQLAgentWorkflow
 from app.utils.logger import logger
 
 

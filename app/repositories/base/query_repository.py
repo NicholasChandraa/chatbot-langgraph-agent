@@ -7,8 +7,9 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection.async_sql_database import AsyncSQLDatabase
-from app.agents.tools.sql_agent_workflow import SQLAgentWorkflow
+from app.agents.workflows.sql_agent_workflow import SQLAgentWorkflow
 from app.config.agent_config.agent_config_manager import get_agent_config
+from app.services.token_tracking_service import track_sql_workflow_tokens
 from app.utils.logger import logger
 
 class QueryRepository:
@@ -126,20 +127,21 @@ class QueryRepository:
         initialization overhead if repository is never used.
         """
         logger.info(f"[{self.agent_name}] Initializing SQL workflow...")
-
-        config = await self.get_config()
+        
+        # Dedicated SQL agent config untuk generate dynamic query
+        sql_config = await get_agent_config("sql_agent", self.db)
 
         self._workflow = SQLAgentWorkflow(
             sql_db=self._sql_db,
             tables=self.tables,
             agent_name=self.agent_name,
-            llm_provider=config["llm_provider"],
-            llm_model=config["model_name"],
-            temperature=config["temperature"],
+            llm_provider=sql_config["llm_provider"],
+            llm_model=sql_config["model_name"],
+            temperature=sql_config["temperature"],
             max_iterations=3
         )
 
-        logger.info(f"[{self.agent_name}] ✅ Workflow initialized | llm={config['llm_provider']}/{config['model_name']}")
+        logger.info(f"[{self.agent_name}] ✅ Workflow initialized | llm={sql_config['llm_provider']}/{sql_config['model_name']}")
         
     def _add_to_cache(self, question: str, result: str):
         """
@@ -254,6 +256,18 @@ class QueryRepository:
             # Extract answer from workflow result
             answer = result.get("answer", "")
 
+            # Step 3.5: Track SQL workflow tokens (with cache & reasoning details)
+            tokens = result.get("tokens", {})
+            if tokens:
+                track_sql_workflow_tokens(
+                    agent_name=self.agent_name,
+                    total_tokens=tokens.get("total_tokens", 0),
+                    prompt_tokens=tokens.get("prompt_tokens", 0),
+                    completion_tokens=tokens.get("completion_tokens", 0),
+                    cache_read_tokens=tokens.get("cache_read_tokens", 0),
+                    reasoning_tokens=tokens.get("reasoning_tokens", 0)
+                )
+
             # Step 4: Cache successful result
             self._add_to_cache(question, answer)
 
@@ -263,7 +277,7 @@ class QueryRepository:
                 question=question,
                 duration=duration,
                 success=True,
-                tokens=result.get("tokens", {})
+                tokens=tokens
             )
 
             logger.info(
