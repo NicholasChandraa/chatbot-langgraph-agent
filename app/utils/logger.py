@@ -40,6 +40,10 @@ from pythonjsonlogger import jsonlogger
 from fastapi import Request, Response
 import time
 
+# Load .env file BEFORE using os.getenv()
+from dotenv import load_dotenv
+load_dotenv()
+
 
 # Install Rich traceback untuk menangkap exception dengan lebih indah
 install_rich_traceback(show_locals=True, max_frames=100)
@@ -244,16 +248,17 @@ def setup_rich_logger(
         log_path = Path(log_dir)
         log_path.mkdir(parents=True, exist_ok=True)
 
-        # Rotating file handler
+        # Rotating file handler - ikuti log level yang di-set
         file_handler = RotatingFileHandler(
             filename=log_path / f"{name}.log",
             maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
             encoding='utf-8'
         )
-        file_handler.setLevel(logging.INFO)
+        # Gunakan level yang sama dengan logger, bukan hardcoded
+        file_handler.setLevel(getattr(logging, level.upper()))
 
-        # Daily handler
+        # Daily handler - ikuti log level yang di-set
         daily_handler = TimedRotatingFileHandler(
             filename=log_path / f"{name}_daily.log",
             when='midnight',
@@ -261,7 +266,8 @@ def setup_rich_logger(
             backupCount=30,
             encoding='utf-8'
         )
-        daily_handler.setLevel(logging.DEBUG)
+        # Gunakan level yang sama dengan logger
+        daily_handler.setLevel(getattr(logging, level.upper()))
 
         # JSON formatter untuk file (production-ready)
         json_formatter = RichJSONFormatter(

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # Server Config
     HOST: str = Field(default="0.0.0.0", env="HOST")
     PORT: int = Field(default=8000, env="PORT")
-    LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
+    LOG_LEVEL: str = Field(default="DEBUG", env="LOG_LEVEL")
 
     # ==============================================
     # LLM PROVIDER CONFIGURATION

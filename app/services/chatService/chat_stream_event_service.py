@@ -15,7 +15,8 @@ from app.services.token_tracking_service import (
     init_token_tracking,
     track_supervisor_tokens,
     get_token_summary,
-    clear_token_tracking
+    clear_token_tracking,
+    save_token_usage_to_db
 )
 
 
@@ -100,7 +101,7 @@ class ChatStreamEventService(BaseChatService):
                 config=config,
                 stream_mode=["messages", "updates"]  # Dual streaming
             ):
-                logger.warning(f"EVENT: {event}")
+                logger.debug(f"EVENT: {event}")
                 # Event structure: (event_type, (data, metadata))
                 event_type = event[0] if isinstance(event, tuple) else None
 
@@ -194,6 +195,16 @@ class ChatStreamEventService(BaseChatService):
 
             # Get token usage summary
             token_summary = get_token_summary()
+            
+            if token_summary:
+                await save_token_usage_to_db(
+                    session_id=session_id,
+                    user_id=user_id,
+                    summary=token_summary,
+                    processing_time_ms=processing_time,
+                    token_repo=repos.token_usage,
+                    user_question=message  # Pass the original question
+                )
 
             yield ChatStreamEventService._format_sse("end", {
                 "metadata": {

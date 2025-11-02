@@ -59,7 +59,7 @@ def extract_token_usage(response: Any) -> Dict[str, int]:
         # Priority 1: Check for usage_metadata as direct attribute (Gemini 2.5+)
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             usage = response.usage_metadata
-            logger.warning(f"[USAGE METADATA]: {usage}")
+            logger.debug(f"[USAGE METADATA]: {usage}")
             # Handle both dict and object formats
             if isinstance(usage, dict):
                 token_usage["prompt_tokens"] = usage.get('input_tokens', 0) or usage.get('prompt_token_count', 0)
@@ -324,16 +324,16 @@ Add -- comments in the SQL to explain each step.
             state["generated_query"] = query
 
             # Detailed token logging for GENERATE QUERY
-            logger.info(
-                f"📊 [GENERATE QUERY - Iteration {state['iteration']}] Token Breakdown:\n"
+            logger.debug(
+                f"[GENERATE QUERY - Iteration {state['iteration']}] Token Breakdown:\n"
                 f"   • Input Tokens:      {token_usage['prompt_tokens']}\n"
                 f"   • Output Tokens:     {token_usage['completion_tokens']}\n"
                 f"   • Cache Read:        {token_usage['cache_read_tokens']}\n"
                 f"   • Reasoning Tokens:  {token_usage['reasoning_tokens']}\n"
                 f"   • TOTAL:             {token_usage['total_tokens']}"
             )
-            logger.info(
-                f"📊 [CUMULATIVE] Running Total:\n"
+            logger.debug(
+                f"[CUMULATIVE] Running Total:\n"
                 f"   • Total Input:       {state['total_prompt_tokens']}\n"
                 f"   • Total Output:      {state['total_completion_tokens']}\n"
                 f"   • GRAND TOTAL:       {state['total_tokens']}"
@@ -584,7 +584,7 @@ RESPOND:
             logger.info(f"✅ Workflow completed")
 
             # Final token summary
-            logger.info(
+            logger.debug(
                 f"📊 [FINAL SUMMARY] SQL Workflow Token Usage:\n"
                 f"   • Iterations:        {final_state.get('iteration', 0)}\n"
                 f"   • Total Input:       {final_state.get('total_prompt_tokens', 0)}\n"
@@ -606,7 +606,7 @@ RESPOND:
             else:
                 answer = "No results from query."
 
-            return {
+            final_result = {
                 "status": "success" if not execution_error else "error",
                 "answer": answer,
                 "query": generated_query,
@@ -618,6 +618,9 @@ RESPOND:
                     "reasoning_tokens": final_state.get("total_reasoning_tokens", 0)
                 }
             }
+            
+            logger.info(f"[Final Result]: {final_result}")
+            return final_result
 
         except Exception as e:
             error_msg = f"Workflow failed: {str(e)}"

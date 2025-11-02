@@ -9,6 +9,7 @@ from app.repositories.supervisor_repository import SupervisorRepository
 from app.repositories.product_repository import ProductRepository
 from app.repositories.sales_repository import SalesRepository
 from app.repositories.store_repository import StoreRepository
+from app.repositories.token_usage_repository import TokenUsageRepository
 from app.utils.logger import logger
 
 @dataclass
@@ -36,6 +37,7 @@ class RepositoryContainer:
     product: ProductRepository
     sales: SalesRepository
     store: StoreRepository
+    token_usage: TokenUsageRepository
 
     # Add more repositories bisa disini
     # contoh: inventory: InventoryRepository
@@ -69,6 +71,7 @@ class RepositoryContainer:
             product=ProductRepository(db),
             sales=SalesRepository(db),
             store=StoreRepository(db),
+            token_usage=TokenUsageRepository(db),
         )
 
         logger.info("✅ RepositoryContainer created with all repositories")

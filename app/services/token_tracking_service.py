@@ -2,9 +2,10 @@
 Token Tracking Service
 Centralized service for tracking and aggregating token usage across all agents
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass, field, asdict
 from contextvars import ContextVar
+from langchain.agents.middleware import after_model
 from app.utils.logger import logger
 
 # Context variable for current conversation's token tracker
@@ -35,10 +36,20 @@ class TokenUsage:
 
 @dataclass
 class ConversationTokenTracking:
-    """Tracks token usage for entire conversation"""
+    """
+    Tracks token usage for entire conversation.
+
+    Structure:
+    - supervisor: Supervisor agent LLM tokens
+    - subagents: {
+        "agent_name": {
+            "llm_tokens": Direct LLM calls from subagent (via middleware),
+            "tool_tokens": Tool execution tokens (SQL workflows)
+        }
+      }
+    """
     supervisor: TokenUsage = field(default_factory=TokenUsage)
-    subagents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    sql_workflows: Dict[str, TokenUsage] = field(default_factory=dict)
+    subagents: Dict[str, Dict[str, TokenUsage]] = field(default_factory=dict)
 
     def add_supervisor_tokens(self, usage_metadata: Dict[str, Any]) -> None:
         """
@@ -74,7 +85,7 @@ class ConversationTokenTracking:
         reasoning_tokens: int = 0
     ) -> None:
         """
-        Add SQL workflow tokens
+        Add SQL workflow tokens (tool execution).
 
         Args:
             agent_name: Name of agent (e.g., 'store_agent')
@@ -92,17 +103,14 @@ class ConversationTokenTracking:
             reasoning_tokens=reasoning_tokens
         )
 
-        if agent_name not in self.sql_workflows:
-            self.sql_workflows[agent_name] = TokenUsage()
-
-        self.sql_workflows[agent_name].add(tokens)
-
-        # Track in subagents as well
+        # Initialize subagent entry if not exists
         if agent_name not in self.subagents:
             self.subagents[agent_name] = {
+                "llm_tokens": TokenUsage(),
                 "tool_tokens": TokenUsage()
             }
 
+        # Add to tool_tokens (SQL workflow execution)
         self.subagents[agent_name]["tool_tokens"].add(tokens)
 
         logger.debug(
@@ -115,15 +123,13 @@ class ConversationTokenTracking:
         """Calculate total tokens across all components"""
         total = self.supervisor.total_tokens
 
-        # Add subagent tokens
+        # Add subagent tokens (both LLM and tool)
         for agent_data in self.subagents.values():
-            agent_tokens = agent_data.get("agent_tokens", TokenUsage())
-            if isinstance(agent_tokens, TokenUsage):
-                total += agent_tokens.total_tokens
+            llm_tokens = agent_data.get("llm_tokens", TokenUsage())
+            tool_tokens = agent_data.get("tool_tokens", TokenUsage())
 
-        # Add SQL workflow tokens
-        for workflow_tokens in self.sql_workflows.values():
-            total += workflow_tokens.total_tokens
+            total += llm_tokens.total_tokens
+            total += tool_tokens.total_tokens
 
         return total
 
@@ -132,35 +138,29 @@ class ConversationTokenTracking:
         Get comprehensive token usage summary
 
         Returns:
-            Dict with total and breakdown
+            Dict with total and breakdown by agent
         """
         # Calculate subagent totals
         subagents_summary = {}
         for agent_name, agent_data in self.subagents.items():
-            agent_tokens = agent_data.get("agent_tokens", TokenUsage())
+            llm_tokens = agent_data.get("llm_tokens", TokenUsage())
             tool_tokens = agent_data.get("tool_tokens", TokenUsage())
 
-            agent_total = 0
-            if isinstance(agent_tokens, TokenUsage):
-                agent_total += agent_tokens.total_tokens
-            if isinstance(tool_tokens, TokenUsage):
-                agent_total += tool_tokens.total_tokens
+            agent_total = llm_tokens.total_tokens + tool_tokens.total_tokens
 
             subagents_summary[agent_name] = {
-                "agent_tokens": agent_tokens.to_dict() if isinstance(agent_tokens, TokenUsage) else agent_tokens,
-                "tool_tokens": tool_tokens.to_dict() if isinstance(tool_tokens, TokenUsage) else tool_tokens,
+                "llm_tokens": llm_tokens.to_dict(),
+                "tool_tokens": tool_tokens.to_dict(),
                 "total": agent_total
             }
+
+        total_subagent_tokens = sum(s["total"] for s in subagents_summary.values())
 
         summary = {
             "total_tokens": self.get_total_tokens(),
             "breakdown": {
                 "supervisor": self.supervisor.to_dict(),
-                "subagents": subagents_summary,
-                "sql_workflows": {
-                    name: tokens.to_dict()
-                    for name, tokens in self.sql_workflows.items()
-                }
+                "subagents": subagents_summary
             }
         }
 
@@ -168,17 +168,10 @@ class ConversationTokenTracking:
             f"📊 Token Summary | "
             f"Total: {summary['total_tokens']} | "
             f"Supervisor: {self.supervisor.total_tokens} | "
-            f"SQL Workflows: {sum(t.total_tokens for t in self.sql_workflows.values())}"
+            f"Subagents: {total_subagent_tokens}"
         )
 
         return summary
-
-    def reset(self) -> None:
-        """Reset all token counters"""
-        self.supervisor = TokenUsage()
-        self.subagents = {}
-        self.sql_workflows = {}
-        logger.debug("📊 Token tracking reset")
 
 
 # ==================== PUBLIC API ====================
@@ -280,17 +273,14 @@ def track_subagent_direct_tokens(
     # Initialize subagent entry if not exists
     if agent_name not in tracker.subagents:
         tracker.subagents[agent_name] = {
-            "agent_tokens": TokenUsage(),
+            "llm_tokens": TokenUsage(),
             "tool_tokens": TokenUsage()
         }
 
-    # Add to agent_tokens (LLM calls from subagent itself)
-    if "agent_tokens" not in tracker.subagents[agent_name]:
-        tracker.subagents[agent_name]["agent_tokens"] = TokenUsage()
+    # Add to llm_tokens (Direct LLM calls from subagent via middleware)
+    tracker.subagents[agent_name]["llm_tokens"].add(tokens)
 
-    tracker.subagents[agent_name]["agent_tokens"].add(tokens)
-
-    logger.debug(f"📊 {agent_name} tokens | total={total_tokens}")
+    logger.debug(f"📊 {agent_name} LLM tokens | total={total_tokens}")
 
 
 def get_token_summary() -> Optional[Dict[str, Any]]:
@@ -313,3 +303,115 @@ def clear_token_tracking() -> None:
     """
     _current_tracker.set(None)
     logger.debug("📊 Token tracking cleared")
+
+
+def create_token_tracking_middleware(agent_name: str) -> Callable:
+    """
+    Factory function to create token tracking middleware for sub-agents.
+
+    This eliminates code duplication across product_agent, sales_agent, store_agent.
+
+    Args:
+        agent_name: Name of the agent (e.g., 'product_agent', 'sales_agent')
+
+    Returns:
+        Async middleware function decorated with @after_model
+
+    Example:
+        ```python
+        from app.services.token_tracking_service import create_token_tracking_middleware
+
+        track_tokens = create_token_tracking_middleware("product_agent")
+
+        agent_graph = create_agent(
+            llm,
+            tools=[product_query],
+            middleware=[track_tokens]  # Already decorated
+        )
+        ```
+    """
+    @after_model
+    async def track_tokens(request, response):
+        """Track LLM token usage from sub-agent"""
+        try:
+            logger.warning(f"[REQUEST]: {request}")
+            # Extract AIMessage from request (last message in the conversation)
+            messages = request.get('messages', [])
+            if not messages:
+                return response
+            
+            # Get the last AIMessage (the LLM response)
+            last_message = messages[-1]
+            usage_metadata = getattr(last_message, 'usage_metadata', None)
+
+            if usage_metadata:
+                input_tokens = usage_metadata.get('input_tokens', 0)
+                output_tokens = usage_metadata.get('output_tokens', 0)
+                total_tokens = usage_metadata.get('total_tokens', input_tokens + output_tokens)
+
+                cache_read = usage_metadata.get('input_token_details', {}).get('cache_read', 0)
+                reasoning = usage_metadata.get('output_token_details', {}).get('reasoning', 0)
+
+                logger.info(
+                    f"📊 [{agent_name}] LLM tokens: {total_tokens} "
+                    f"(input: {input_tokens}, output: {output_tokens}, "
+                    f"cache: {cache_read}, reasoning: {reasoning})"
+                )
+
+                track_subagent_direct_tokens(
+                    agent_name=agent_name,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cache_read_tokens=cache_read,
+                    reasoning_tokens=reasoning
+                )
+        except Exception as e:
+            logger.error(f"[{agent_name}] Token tracking error: {e}")
+
+        return response
+
+    return track_tokens
+
+
+# PUBLIC API
+async def save_token_usage_to_db(
+    session_id: str,
+    user_id: str,
+    summary: Dict[str, Any],
+    processing_time_ms: float,
+    token_repo,  # TokenUsageRepository
+    user_question: str = None
+) -> Optional[int]:
+    """
+    Save token usage summary to database.
+
+    Args:
+        session_id (str): Conversation session ID
+        user_id (str): User identifier
+        summary (Dict[str, Any]): Token summary from get_token_summary()
+        processing_time_ms (float): Request processing time
+        token_repo (_type_): TokenUsageRepository instance
+        user_question: User's question (optional)
+
+    Returns:
+        Optional[int]: usage_id if successful, None otherwise
+    """
+    if not summary:
+        logger.warning("No token summary to save")
+        return None
+    
+    try:
+        usage_id = await token_repo.save_usage(
+            session_id=session_id,
+            user_id=user_id,
+            summary=summary,
+            processing_time_ms=processing_time_ms,
+            user_question=user_question
+        )
+        
+        return usage_id
+    
+    except Exception as e:
+        logger.error(f"Error in save_token_usage_to_db: {e}")
+        return None
