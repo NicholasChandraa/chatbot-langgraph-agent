@@ -14,6 +14,7 @@ from app.database.connection.connection import db_manager
 from app.config.agent_config.agent_config_manager import get_agent_config
 from app.database.memory.checkpointer_manager import checkpointer_manager
 from app.database.memory.store_manager import store_manager
+from app.database.cache.redis_cache_manager import get_redis_cache
 
 
 
@@ -29,6 +30,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"📍 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🤖 Default LLM Provider: {settings.DEFAULT_LLM_PROVIDER}")
     logger.info(f"🔧 Debug Mode: {settings.DEBUG}")
+
+    try:
+        cache = await get_redis_cache()
+        await cache.init()
+        health = await cache.health_check()
+        
+        if health.get("status") == "ok":
+            logger.info(f"✅ Redis connected | mode={health.get('mode')} | ping={health.get('ping_ms')}ms")
+        else:
+            logger.warning("⚠️ Redis reported unhealthy status, local fallback, cache akan dipakai")
+
+    except Exception as e:
+        logger.error(f"❌ Redis initialization error: {e}")
+        logger.warning("⚠️ Lanjut tanpa Redis (fallback ke local cache)")
 
     # Initialize database connection pool
     try:
@@ -53,7 +68,7 @@ async def lifespan(app: FastAPI):
                 logger.error(f"❌ Store init failed: {e}")
                 logger.warning("⚠️ Continuing without long-term memory")
 
-            # Warm up cache for common agents
+            # Warm up config cache untuk agent umum (akan HIT Redis kalau aktif)
             async for db in db_manager.get_session():
                 common_agents = ["sql_agent", "product_agent", "sales_agent", "report_agent", "store_agent"]
                 for agent_name in common_agents:
@@ -101,6 +116,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error closing store: {e}")
 
+    try:
+        cache = await get_redis_cache()
+        await cache.close()
+    except Exception as e:
+        logger.error(f"Error closing Redis: {e}")
+    
     logger.info("✅ Shutdown Complete")
     logger.info("=" * 60)
     

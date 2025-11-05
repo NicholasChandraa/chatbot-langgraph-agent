@@ -2,6 +2,7 @@
 Query Repository - Core SQl Execution Logic
 Centralized query execution with caching, metrics, and validation
 """
+import hashlib
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,8 @@ from app.agents.workflows.sql_agent_workflow import SQLAgentWorkflow
 from app.config.agent_config.agent_config_manager import get_agent_config
 from app.services.token_tracking_service import track_sql_workflow_tokens
 from app.utils.logger import logger
+from app.database.cache.redis_cache_manager import get_redis_cache
+
 
 class QueryRepository:
     """
@@ -58,6 +61,7 @@ class QueryRepository:
 
         # Lazy-initialized workflow (only create when first query executed)
         self._workflow: Optional[SQLAgentWorkflow] = None
+        # Local fallback, yang digunakan apabila Redis tidak tersedia
         self._cache: Dict[str, Dict[str, Any]] = {}
 
         # Simple in-memory cache
@@ -77,11 +81,13 @@ class QueryRepository:
         Returns:
             Cache key string
         """
-        # Case-insensitive caching
-        normalized = question.lower().strip()
-        return f"{self.agent_name}:{hash(normalized)}"
+        # Case-insensitive hashing dan stable
+        normalized = question.lower().strip().encode("utf-8")
+        qhash = hashlib.sha256(normalized).hexdigest()[:16]
+
+        return f"query:{self.agent_name}:{qhash}"
     
-    def _get_from_cache(self, question: str) -> Optional[str]:
+    async def _get_from_cache(self, question: str) -> Optional[str]:
         """
         Retrieve cached result if available and not expired.
 
@@ -91,21 +97,28 @@ class QueryRepository:
             Cached answer if valid, None otherwise
         """
         cache_key = self._get_cache_key(question)
+        cache = await get_redis_cache()
 
-        if cache_key not in self._cache:
+        # 1) Coba ambil melalui redis
+        if cache._enabled():
+            val = await cache.get(cache_key)
+            if val is not None:
+                logger.debug(f"[{self.agent_name}] Redis HIT: {cache_key}")
+                return val
+            
+        # 2) Fallback ke in-memory cache
+        entry = self._cache.get(cache_key)
+        if not entry:
             return None
         
-        cached_entry = self._cache[cache_key]
-        cached_time = cached_entry["timestamp"]
-
+        age_seconds = (datetime.now() - entry["timestamp"]).total_seconds()
         # Check if cache expired
-        age_seconds = (datetime.now() - cached_time).total_seconds()
         if age_seconds > self._cache_ttl:
             # Expired, remove from cache
-            del self._cache[cache_key]
+            self._cache.pop(cache_key, None)
             return None
         
-        return cached_entry["result"]
+        return entry["result"]
 
     async def get_config(self) -> Dict[str, Any]:
         """
@@ -143,7 +156,7 @@ class QueryRepository:
 
         logger.info(f"[{self.agent_name}] ✅ Workflow initialized | llm={sql_config['llm_provider']}/{sql_config['model_name']}")
         
-    def _add_to_cache(self, question: str, result: str):
+    async def _add_to_cache(self, question: str, result: str):
         """
         Add query result
 
@@ -152,7 +165,17 @@ class QueryRepository:
             result (str): The query result to cache
         """
         cache_key = self._get_cache_key(question)
+        cache = await get_redis_cache()
 
+        # 1) Simpan ke Redis (TTL detik)
+        if cache.is_enabled():
+            ok = await cache.set(cache_key, result, ttl=self._cache_ttl)
+            if ok:
+                return
+            
+            logger.debug(f"[{self.agent_name}] Redis SET failed, fallback ke local cache")
+        
+        # 2) Fallback ke in-memory cache
         self._cache[cache_key] = {
             "result": result,
             "timestamp": datetime.now()
@@ -165,7 +188,7 @@ class QueryRepository:
                 self._cache.keys(),
                 key=lambda k: self._cache[k]["timestamp"]
             )
-            del self._cache[oldest_key]
+            self._cache.pop(oldest_key, None)
     
     def _record_metrics(
         self,
@@ -237,7 +260,7 @@ class QueryRepository:
         start_time = datetime.now()
 
         # Step 1: Check cache
-        cached_result = self._get_from_cache(question)
+        cached_result = await self._get_from_cache(question)
         if cached_result is not None:
             logger.info(f"[{self.agent_name}] Cache HIT | question: {question}...")
             return cached_result
@@ -269,7 +292,7 @@ class QueryRepository:
                 )
 
             # Step 4: Cache successful result
-            self._add_to_cache(question, answer)
+            await self._add_to_cache(question, answer)
 
             # Step 5: Record metrics
             duration = (datetime.now() - start_time).total_seconds()
@@ -302,11 +325,22 @@ class QueryRepository:
             # Return user-friendly error
             return f"Error executing query: {str(e)}"
 
-    def clear_cache(self):
+    async def clear_cache(self):
         """Clear all cached query results."""
+        # 1) Hapus dari Redis
+        deleted = 0
+        cache = await get_redis_cache()
+        
+        if cache.is_enabled():
+            try:
+                deleted = await cache.clear_pattern(f"query:{self.agent_name}:*")
+            except Exception as e:
+                logger.warning(f"[{self.agent_name}] Gagal clear Redis pattern: {e}")
+
+        # 2) Bersihkan fallback cache lokal
         cache_size = len(self._cache)
         self._cache.clear()
-        logger.info(f"[{self.agent_name}] 🪣 Cache cleared | entries = {cache_size}")
+        logger.info(f"[{self.agent_name}] 🪣 Cache cleared | redis_deleted={deleted} | local_entries = {cache_size}")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """
@@ -317,7 +351,7 @@ class QueryRepository:
         """
         return {
             "agent_name": self.agent_name,
-            "cache_size": len(self._cache),
+            "local_cache_size": len(self._cache),
             "cache_ttl_seconds": self._cache_ttl,
             "tables": self.tables
         }
