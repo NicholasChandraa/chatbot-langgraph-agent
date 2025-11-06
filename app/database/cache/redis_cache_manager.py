@@ -457,7 +457,7 @@ class RedisCacheManager:
             if total_requests > 0:
                 stats["hit_rate"] = round(stats["hits"] / total_requests * 100, 2)
             else:
-                stats["hit_rate"] - 0.0
+                stats["hit_rate"] = 0.0
 
             return stats
         

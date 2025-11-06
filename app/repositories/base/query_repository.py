@@ -100,7 +100,7 @@ class QueryRepository:
         cache = await get_redis_cache()
 
         # 1) Coba ambil melalui redis
-        if cache._enabled():
+        if cache.is_enabled():
             val = await cache.get(cache_key)
             if val is not None:
                 logger.debug(f"[{self.agent_name}] Redis HIT: {cache_key}")

@@ -1,10 +1,13 @@
-from typing import Optional, Dict
+import json
+from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.database.model.agent_config import AgentConfig
 from app.utils.logger import logger
+from app.database.cache.redis_cache_manager import get_redis_cache
 
 class AgentConfigManager:
     """
@@ -23,66 +26,101 @@ class AgentConfigManager:
         self._cache_ttl = cache_ttl_seconds
         self._last_refresh: Dict[str, datetime] = {}
 
+    # ---------------------- Redis Helpers ----------------------
+    @staticmethod
+    def _redis_key(agent_name: str) -> str:
+        return f"agent_config:{agent_name}"
+    
+    async def _redis_get(self, agent_name: str) -> Optional[Dict[str, Any]]:
+        cache = await get_redis_cache()
+        if not cache.is_enabled():
+            return None
+        
+        try:
+            # Gunakan get_json bila tersedia
+            data = await cache.get_json(self._redis_key(agent_name))
+
+            if isinstance(data, dict):
+                return data
+            
+            # fallback kalau backend hanya simpan string
+            if isinstance(data, str):
+                return json.loads(data)
+        except Exception as e:
+            logger.warning(f"[AgentConfig] Redis GET error for '{agent_name}': {e}")
+        
+        return None
+
+    async def _redis_set(self, agent_name: str, config: Dict[str, Any]) -> None:
+        cache = await get_redis_cache()
+        if not cache.is_enabled():
+            return
+        
+        try:
+            await cache.set_json(self._redis_key(agent_name), config, ttl=self._cache_ttl)
+        except Exception as e:
+            logger.warning(f"[AgentConfig] Redis SET error for '{agent_name}': {e}")
+
+
     async def get_config(
         self,
         agent_name: str,
         db: AsyncSession
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
-        Get agent configuration from database (with cache).
+        Ambil konfigurasi Agent.
 
-        Args:
-            agent_name: Name of agent (e.g., 'sql_agent')
-            db: Database session
-
-        Returns:
-            Dict with: provider, model_name, temperature, max_tokens, etc.
-
-        Raises:
-            ValueError: If agent config not found in database
+        Urutan lookup:
+        1) Redis (jika aktif)
+        2) Local hot cache (in-memory, TTL), fallback jika redis tidak aktif
+        3) Database (source of truth), lalu tuliskan kembali ke Redis + local
         """
-        # Check cache first
+        # 1) Redis first
+        redis_cfg = await self._redis_get(agent_name)
+        if redis_cfg:
+            logger.debug(f"✅ Using Redis cached config for '{agent_name}'")
+
+            # segarkan hot cache lokal untuk akses cepat
+            self._update_cache(agent_name, redis_cfg)
+            return redis_cfg
+        
+        # 2) Local hot cache (fallback)
         if self._is_cache_valid(agent_name):
-            logger.debug(f"✅ Using cached config for '{agent_name}'")
+            logger.debug(f"✅ Using local cached config for '{agent_name}'")
             return self._cache[agent_name]
         
-        # Load fom database
-        logger.debug(f"Loading config for '{agent_name}' from database...")
-        config = await self._load_from_db(agent_name, db)
-
-        if config is None:
-            raise ValueError(
-                f"Agent config not found for '{agent_name}'."
-                f"Please ensure agent_configs table has entry for this agent."
-            )
-        
-        # Update cache
+        # 3) DB -> set ke Redis + local
+        config = await self._load_config_from_db(agent_name, db)
+        await self._redis_set(agent_name, config)
         self._update_cache(agent_name, config)
-        logger.info(
-            f"✅ Config loaded for '{agent_name}': "
-            f"{config['llm_provider']}/{config['model_name']} "
-            f"(temp={config['temperature']})"
-        )
-
+        
         return config
-    
-    async def _load_from_db(
+
+
+    async def _load_config_from_db(
             self,
             agent_name: str,
             db: AsyncSession
-    ) -> Optional[Dict[str, any]]:
+    ) -> Optional[Dict[str, Any]]:
         """Load config from database"""
         stmt = select(AgentConfig).where(
             AgentConfig.agent_name == agent_name,
-            AgentConfig.is_active == True
+            AgentConfig.is_active.is_(True)
         )
 
-        result = await db.execute(stmt)
-        config_row = result.scalar_one_or_none()
-
-        if config_row is None:
-            return None
+        try:
+            result = await db.execute(stmt)
+            config_row = result.scalar_one_or_none()
+        except SQLAlchemyError as e:
+            # Timeout, koneksi putus, dsb.
+            logger.exception("DB error saat load AgentConfig untuk %s", agent_name)
+            # Naikkan exception yang lebih netral ke service layer
+            raise RuntimeError("Gagal mengakses database") from e
         
+        if config_row is None:
+                logger.warning(f"[DANGEROUS] agent config tidak ditemukan dengan nama {agent_name}")
+                return None
+            
         return {
             "agent_name": config_row.agent_name,
             "llm_provider": config_row.llm_provider,
@@ -91,6 +129,7 @@ class AgentConfigManager:
             "max_tokens": config_row.max_tokens,
             "config_metadata": config_row.config_metadata or {}
         }
+        
     
     def _is_cache_valid(self, agent_name: str) -> bool:
         """Check if cache entry is still valid"""
@@ -112,11 +151,7 @@ class AgentConfigManager:
 
     def invalidate_cache(self, agent_name: Optional[str] = None):
         """
-        Invalidate cache for specific agent or all agents.
-        Call this after updating config in database.
-
-        Args:
-            agent_name: Specific agent to invalidate, or None for all
+        Invalidate cache lokal (in-memory) - sinkron & cepat
         """
         if agent_name:
             self._cache.pop(agent_name, None)
@@ -126,13 +161,38 @@ class AgentConfigManager:
             self._cache.clear()
             self._last_refresh.clear()
             logger.info(f"🗑️ All config cache invalidated")
+
+    async def invalidate_cache_redis(self, agent_name: Optional[str] = None) -> int:
+        """
+        Invalidate cache di Redis. Return jumlah key yang terhapus.
+
+        Dibuat async supaya route bisa 'await' tanpa blocking.
+
+        Args:
+            agent_name (Optional[str], optional): nama agent yang ingin di invalidate cachenya. Defaults to None.
+        """
+        cache = await get_redis_cache()
+        if not cache.is_enabled():
+            return 0
+        
+        pattern = self._redis_key(agent_name) if agent_name else "agent_config:*"
+
+        try:
+            deleted = await cache.clear_pattern(pattern)
+
+            logger.info(f"🗑️ Redis cache invalidated | pattern={pattern} | deleted = {deleted}")
+            
+            return deleted
+        except Exception as e:
+            logger.warning(f"[AgentConfig] Redis invalidate error (pattern={pattern}): {e}")
+            return 0
     
     def get_cache_stats(self) -> Dict:
         """Get cache statistics (for monitoring)"""
         return {
-            "cached_agents": list(self._cache.keys()),
-            "cache_size": len(self._cache),
+            "local_cache_size": len(self._cache),
             "cache_ttl_seconds": self._cache_ttl,
+            "redis_namespace": "agent_config:*"
         }
 
 # Singleton instance
@@ -141,7 +201,7 @@ agent_config_manager = AgentConfigManager(cache_ttl_seconds=300)
 async def get_agent_config(
     agent_name: str,
     db: AsyncSession
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Get agent configuration from database.
     
