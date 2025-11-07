@@ -4,6 +4,7 @@ Provides long-term memory storage using PostgreSQL
 """
 from typing import Optional
 from langgraph.store.postgres.aio import AsyncPostgresStore
+from langchain.embeddings import init_embeddings
 from app.config.settings.settings import get_settings
 from app.utils.logger import logger
 
@@ -25,7 +26,7 @@ class StoreManager:
     
     async def init(self):
         """
-        Initialize PostgreSQL store.
+        Initialize PostgreSQL store with semantic search enabled.
         Creates store tables if not exits.
         """
         if self._store is not None:
@@ -33,21 +34,58 @@ class StoreManager:
             return
 
         try:
-            logger.info("🧠 Initializing long-term memory (store)...")
+            logger.info("🧠 Initializing long-term memory (store) with semantic search...")
 
             # Create async store with connection string
             conn_string = self.settings.POSTGRES_URL
 
-            # Enter the async context manager
-            self._store_cm = AsyncPostgresStore.from_conn_string(conn_string)
-            self._store = await self._store_cm.__aenter__()
+            # Log masked DB URL for debugging
+            masked_url = conn_string.replace(self.settings.DB_PASSWORD, "***")
+            logger.info(f"📊 Database URL: {masked_url}")
+
+            # Enter the async context manager with semantic search configuration
+            try:
+                self._store_cm = AsyncPostgresStore.from_conn_string(
+                    conn_string,
+                    index={
+                        "embed": init_embeddings("qwen3-embedding:4b", provider="ollama", base_url="http://localhost:11434"),
+                        "dims": 2000,
+                        "fields": ["$"]  # "$" means embed all fields
+                    }
+                )
+                self._store = await self._store_cm.__aenter__()
+                logger.info("✅ Store context manager initialized")
+
+            except Exception as e:
+                logger.error(f"❌ Failed to create store context manager: {e}", exc_info=True)
+                raise
 
             # Setup store tables (creates if not exist)
-            await self._store.setup()
+            try:
+                logger.info("📋 Setting up store tables (store, store_vectors)...")
+                await self._store.setup()
+                logger.info("✅ Store tables created/verified")
 
-            logger.info("✅ Long-term memory initialized with PostgreSQL")
+            except Exception as e:
+                logger.error(f"❌ Failed to setup store tables: {e}", exc_info=True)
+                logger.error("💡 Troubleshooting:")
+                logger.error("   1. Make sure PostgreSQL user has CREATE TABLE permissions")
+                logger.error("   2. Verify pgvector extension is installed: CREATE EXTENSION vector;")
+                logger.error("   3. Check database connection is working")
+                raise
+
+            logger.info("✅ Long-term memory initialized with PostgreSQL + Semantic Search")
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize store: {e}", exc_info=True)
+            # Clean up on failure
+            if self._store_cm is not None:
+                try:
+                    await self._store_cm.__aexit__(None, None, None)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup store on error: {cleanup_error}")
+                self._store_cm = None
+                self._store = None
             raise e
 
     async def close(self):

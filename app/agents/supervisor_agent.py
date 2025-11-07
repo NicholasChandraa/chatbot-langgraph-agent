@@ -5,6 +5,7 @@ from deepagents import create_deep_agent
 from app.agents.sub_agent.product_agent import create_product_agent
 from app.agents.sub_agent.sales_agent import create_sales_agent
 from app.agents.sub_agent.store_agent import create_store_agent
+from app.services.memory_service.long_term_memory import create_memory_backend
 
 from app.repositories.repository_container import RepositoryContainer
 from app.config.agent_config.agent_config_manager import get_agent_config
@@ -26,6 +27,10 @@ async def create_supervisor_agent(
     - Sales questions -> sales_agent
     - Store questions -> store_agent
 
+    Include DeepAgents long-term memory via CompositeBackend:
+    - Transient files: /notes.txt (per-thread, auto-cleanup)
+    - Persistent files: /memories/*.txt (cross-thread, permanent)
+
     Args:
         db: Database session for loading agent configs
         checkpointer: Optional checkpointer for persistent memory
@@ -39,8 +44,6 @@ async def create_supervisor_agent(
     logger.info("☑️ Creating Supervisor Agent with DeepAgents...")
 
     # Load supervisor config
-    # Note: We use product repo temporarily for supervisor config
-    # TODO: Consider creating dedicated SupervisorRepository if supervisor needs its own data access
     supervisor_config = await repos.supervisor.get_config()
 
     # Create supervisor LLM
@@ -62,15 +65,29 @@ async def create_supervisor_agent(
     base_prompt = get_supervisor_base_prompt()
     system_prompt = inject_user_context(base_prompt, user_context)
 
+    use_backend = store is not None
+
+    if use_backend:
+        logger.info("✅ Store available - enabling DeepAgents filesystem memory")
+        backend = create_memory_backend
+    else:
+        logger.warning("⚠️ Store not avilable - DeepAgents memory disabled")
+        backend = None
+
     supervisor_agent = create_deep_agent(
         model=supervisor_llm,
         subagents=subagents,
         checkpointer=checkpointer,
         store=store,
+        backend=backend if use_backend else None,
         system_prompt=system_prompt,
     )
 
     memory_status = "with checkpointer" if checkpointer else "without checkpointer"
-    logger.info(f"✅ Supervisor Agent Created ({memory_status})")
+    store_status = "with persistent store" if store else "without store"
+
+    backend_status = "with DeepAgents memory" if use_backend else "without DeepAgents memory"
+
+    logger.info(f"✅ Supervisor Agent Created ({memory_status}, {store_status}, {backend_status})")
 
     return supervisor_agent

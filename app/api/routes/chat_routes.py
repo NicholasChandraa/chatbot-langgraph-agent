@@ -10,7 +10,7 @@ from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.utils.logger import logger
 from app.database.connection.connection import get_db
 from app.repositories.repository_container import RepositoryContainer
-from app.services.chatService import ChatService, ChatStreamService, ChatStreamEventService
+from app.services.chat_service import ChatService, ChatStreamService, ChatStreamEventService
 
 router = APIRouter()
 
