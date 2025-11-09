@@ -48,8 +48,8 @@ class StoreManager:
                 self._store_cm = AsyncPostgresStore.from_conn_string(
                     conn_string,
                     index={
-                        "embed": init_embeddings("qwen3-embedding:4b", provider="ollama", base_url="http://localhost:11434"),
-                        "dims": 2000,
+                        "embed": init_embeddings("qwen3-embedding:0.6b", provider="ollama", base_url="http://localhost:11434"),
+                        "dims": 1024,
                         "fields": ["$"]  # "$" means embed all fields
                     }
                 )

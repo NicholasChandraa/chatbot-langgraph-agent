@@ -5,7 +5,7 @@ Handles token-by-token streaming chat message processing
 import time
 import json
 from typing import Dict, Any, AsyncIterator
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from app.utils.logger import logger
 from app.agents.supervisor_agent import create_supervisor_agent
@@ -18,6 +18,11 @@ from app.services.token_tracking_service import (
     clear_token_tracking,
     save_token_usage_to_db
 )
+from app.services.memory_service.memory_context_loader import (
+    load_user_context,
+    format_user_context_for_prompt
+)
+from app.agents.tools.memory_tools import Context
 
 
 class ChatStreamEventService(BaseChatService):
@@ -74,8 +79,10 @@ class ChatStreamEventService(BaseChatService):
             # Setup memory
             checkpointer = ChatStreamEventService._get_checkpointer(session_id)
             store = ChatStreamEventService._get_store(session_id)
-            user_context = await ChatStreamEventService._load_user_context(user_id)
-            user_context_string = ChatStreamEventService._format_user_context_string(user_context)
+            
+            # Pre-load user context for personalization
+            user_context_dict = await load_user_context(user_id)
+            user_context_string = format_user_context_for_prompt(user_context_dict)
 
             # Create supervisor agent
             app = await create_supervisor_agent(
@@ -99,14 +106,17 @@ class ChatStreamEventService(BaseChatService):
             current_agent = None
             # Track subagent execution
             current_subagent = None
+            # Track shown content to prevent duplicates
+            shown_content_hashes = set()
 
             # Stream with dual mode: tokens + state updates
             async for event in app.astream(
                 {"messages": [HumanMessage(content=message)]},
                 config=config,
+                context=Context(user_id=user_id),
                 stream_mode=["messages", "updates"]  # Dual streaming
             ):
-                logger.debug(f"EVENT: {event}")
+                # logger.debug(f"EVENT: {event}")
                 # Event structure: (event_type, (data, metadata))
                 event_type = event[0] if isinstance(event, tuple) else None
 
@@ -149,6 +159,32 @@ class ChatStreamEventService(BaseChatService):
                             "agent": display_agent
                         })
 
+                    # Skip ToolMessages (internal tool responses - not for user display)
+                    if isinstance(chunk, ToolMessage):
+                        logger.debug(f"Skipping ToolMessage from streaming: {getattr(chunk, 'name', 'unknown')}")
+                        continue
+
+                    # Check for tool calls
+                    chunk_tool_calls = getattr(chunk, 'tool_calls', [])
+
+                    # If this message has tool_calls, emit tool_status events
+                    if chunk_tool_calls:
+                        for tool_call in chunk_tool_calls:
+                            tool_name = tool_call.get('name', 'unknown')
+                            tool_args = tool_call.get('args', {})
+
+                            # Generate friendly message
+                            friendly_msg = ChatStreamEventService._get_friendly_tool_message(tool_name, tool_args)
+
+                            # Emit tool_status event
+                            yield ChatStreamEventService._format_sse("tool_status", {
+                                "status": "executing",
+                                "tool": tool_name,
+                                "message": friendly_msg,
+                                "agent": display_agent
+                            })
+                            logger.info(f"🔧 Tool executing: {tool_name} - {friendly_msg}")
+
                     # Extract and stream token content
                     content = getattr(chunk, 'content', None)
 
@@ -158,6 +194,19 @@ class ChatStreamEventService(BaseChatService):
 
                     # Extract text from content (handles various formats)
                     text_chunks = ChatStreamEventService._extract_text_from_content(content)
+
+                    # Create content hash to detect duplicates
+                    content_hash = hash("".join(text_chunks))
+
+                    # Skip if we've already shown this content
+                    if content_hash in shown_content_hashes:
+                        logger.debug(f"Skipping duplicate content (hash={content_hash})")
+                        continue
+
+                    # Mark as shown
+                    shown_content_hashes.add(content_hash)
+
+                    # Stream the content
                     for text in text_chunks:
                         yield ChatStreamEventService._format_sse("chunk", {
                             "chunk": text,
@@ -215,7 +264,7 @@ class ChatStreamEventService(BaseChatService):
                 "metadata": {
                     "processing_time_ms": round(processing_time, 2),
                     "memory_enabled": checkpointer is not None,
-                    "user_context_loaded": user_context.get("has_data", False),
+                    "store_enabled": store is not None,
                     "token_usage": token_summary
                 }
             })
@@ -231,6 +280,61 @@ class ChatStreamEventService(BaseChatService):
     def _format_sse(event: str, data: Dict[str, Any]) -> str:
         """Format data as Server-Sent Event"""
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    @staticmethod
+    def _get_friendly_tool_message(tool_name: str, tool_args: Dict[str, Any]) -> str:
+        """
+        Generate friendly user-facing message for tool execution.
+
+        Args:
+            tool_name: Name of the tool being executed
+            tool_args: Arguments passed to the tool
+
+        Returns:
+            User-friendly message describing what's happening
+        """
+        # Filesystem operations
+        if tool_name == "write_file":
+            file_path = tool_args.get('file_path', '')
+            if 'profile' in file_path:
+                return "💾 Menyimpan profil Anda..."
+            elif 'preference' in file_path:
+                return "💾 Menyimpan preferensi..."
+            else:
+                return "💾 Menyimpan informasi..."
+
+        elif tool_name == "read_file":
+            return "📖 Mengecek data tersimpan..."
+
+        elif tool_name == "edit_file":
+            return "✏️ Memperbarui informasi..."
+
+        # Subagent delegation
+        elif tool_name == "task":
+            subagent = tool_args.get('subagent_type', '')
+            if 'product' in subagent.lower():
+                return "🍩 Mencari informasi produk..."
+            elif 'sales' in subagent.lower():
+                return "📊 Menganalisis data penjualan..."
+            elif 'store' in subagent.lower():
+                return "🏪 Mengecek informasi toko..."
+            else:
+                return "🔍 Memproses permintaan..."
+
+        # Database query tools (from sub-agents)
+        elif "query" in tool_name.lower():
+            if "product" in tool_name:
+                return "🍩 Mencari produk di database..."
+            elif "sales" in tool_name:
+                return "📊 Menganalisis data penjualan..."
+            elif "store" in tool_name:
+                return "🏪 Mencari info toko..."
+            else:
+                return "🔍 Mencari di database..."
+
+        # Default fallback
+        else:
+            return f"⚙️ Memproses {tool_name}..."
 
     @staticmethod
     def _map_agent_name(agent_name: str, current_subagent: str = None) -> str | None:
