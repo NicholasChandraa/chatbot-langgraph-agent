@@ -69,6 +69,7 @@ async def create_supervisor_agent(
     # Build system prompt
     base_prompt = get_supervisor_base_prompt()
     system_prompt = inject_user_context(base_prompt, user_context)
+    logger.debug(f"[SYSTEM_PROMPT]: {system_prompt}")
     
     # Memory tools (only if store available)
     memory_tools = []
